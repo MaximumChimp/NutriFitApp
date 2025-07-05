@@ -4,18 +4,50 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "android": "DARK_MODE=media expo start --android",
+    "ios": "DARK_MODE=media expo start --ios",
+    "web": "DARK_MODE=media expo start --web"
   },
   "dependencies": {
+    "@expo/html-elements": "^0.4.2",
+    "@expo/metro-runtime": "~5.0.4",
+    "@gluestack-ui/actionsheet": "^0.2.53",
+    "@gluestack-ui/button": "^1.0.14",
+    "@gluestack-ui/form-control": "^0.1.19",
+    "@gluestack-ui/icon": "^0.1.27",
+    "@gluestack-ui/image": "^0.1.17",
+    "@gluestack-ui/input": "^0.1.38",
+    "@gluestack-ui/nativewind-utils": "^1.0.26",
+    "@gluestack-ui/overlay": "^0.1.22",
+    "@gluestack-ui/toast": "^1.0.9",
+    "@legendapp/motion": "^2.4.0",
+    "@react-navigation/native": "^7.1.14",
+    "@react-navigation/native-stack": "^7.3.21",
+    "babel-plugin-module-resolver": "^5.0.2",
     "expo": "~53.0.17",
+    "expo-linear-gradient": "~14.1.5",
     "expo-status-bar": "~2.2.3",
-    "react": "19.0.0",
-    "react-native": "0.79.5"
+    "nativewind": "^4.1.23",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-native": "0.79.5",
+    "react-native-chart-kit": "^6.12.0",
+    "react-native-css-interop": "^0.1.22",
+    "react-native-gesture-handler": "~2.24.0",
+    "react-native-linear-gradient": "^2.8.3",
+    "react-native-reanimated": "~3.17.4",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-screens": "~4.11.1",
+    "react-native-svg": "15.11.2",
+    "react-native-swiper": "^1.6.0",
+    "react-native-web": "^0.20.0",
+    "tailwindcss": "^3.4.17",
+    "@react-native-picker/picker": "2.11.1"
   },
   "devDependencies": {
-    "@babel/core": "^7.20.0"
+    "@babel/core": "^7.20.0",
+    "@types/react": "~19.0.10",
+    "jscodeshift": "^0.15.2"
   },
   "private": true
 }
