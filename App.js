@@ -11,6 +11,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import SplashScreen from './components/screens/Splashscreen/SplashScreen';
 import Login from './components/screens/LandingPage/LandingPage';
 import GetStarted from './components/screens/GetStarted/OnboardingScreen'; // renamed correctly
+import SignUpWithEmail from './components/screens/GetStarted/SignUpWithEmail';
 
 const Stack = createNativeStackNavigator();
 
@@ -33,6 +34,17 @@ export default function App() {
             <>
               <Stack.Screen name="Login" component={Login} />
               <Stack.Screen name="GetStarted" component={GetStarted} />
+             <Stack.Screen
+              name="SignUpWithEmail"
+              component={SignUpWithEmail}
+              options={{
+                animation: 'fade_from_bottom',
+                presentation: 'modal', // Makes it feel like a smooth popup
+                gestureEnabled: true,  // Allow swipe to close on iOS
+                headerShown: false     // Optional: hide header for cleaner look
+              }}
+            />
+
             </>
           )}
         </Stack.Navigator>
