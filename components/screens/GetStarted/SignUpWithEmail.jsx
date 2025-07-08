@@ -52,9 +52,9 @@ const handleSignup = async () => {
     Alert.alert("Success", "Your account has been created successfully!");
     // navigation.replace("Home");  <-- Remove or comment this out
   } catch (error) {
-    console.error("Signup error:", error);
-    Alert.alert("Signup Error", error.message || "Something went wrong.");
-  } finally {
+  console.error("Signup error:", JSON.stringify(error, null, 2));
+  Alert.alert("Signup Error", error.message || "Something went wrong.");
+} finally {
     setLoading(false);
   }
 };

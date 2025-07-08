@@ -1,16 +1,25 @@
 {
+  "extends": "expo/tsconfig.base",
   "compilerOptions": {
+    "strict": true,
     "paths": {
       "@/*": [
         "./*"
       ],
       "tailwind.config": [
         "./tailwind.config.js"
+      ],
+      "@firebase/auth": [
+        "./node_modules/@firebase/auth/dist/index.rn.d.ts"
       ]
     }
   },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "nativewind-env.d.ts"
+  ],
   "exclude": [
     "node_modules"
-  ],
-  "extends": "expo/tsconfig.base"
+  ]
 }
