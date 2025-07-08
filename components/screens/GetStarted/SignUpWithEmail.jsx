@@ -20,6 +20,48 @@ import { auth, db } from "@/config/firebase-config";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
 
+// Harris-Benedict TDEE calculator with weight adjustment
+function calculateCalories(user) {
+  const { gender, weight, height, birthday, activityLevel, targetWeightChange } = user;
+
+  const birthDate = new Date(birthday);
+  const age = new Date().getFullYear() - birthDate.getFullYear();
+
+  const heightInCm = parseFloat(height);
+  const weightInKg = parseFloat(weight);
+  const weightChange = parseFloat(targetWeightChange || "0");
+
+  let bmr = 0;
+  if (gender === "male") {
+    bmr = 88.362 + 13.397 * weightInKg + 4.799 * heightInCm - 5.677 * age;
+  } else if (gender === "female") {
+    bmr = 447.593 + 9.247 * weightInKg + 3.098 * heightInCm - 4.330 * age;
+  }
+
+  const activityFactors = {
+    sedentary: 1.2,
+    light: 1.375,
+    moderate: 1.55,
+    active: 1.725,
+    veryActive: 1.9,
+  };
+
+  const activityFactor = activityFactors[activityLevel] || 1.2;
+  const tdee = bmr * activityFactor;
+
+  const calorieAdjustment = (weightChange * 7700) / 30;
+  const adjustedCalories = weightChange >= 0 ? tdee + calorieAdjustment : tdee - Math.abs(calorieAdjustment);
+
+  return {
+    requiredCalories: Math.round(adjustedCalories),
+    breakdown: {
+      bmr: Math.round(bmr),
+      activityFactor,
+      tdee: Math.round(tdee),
+      calorieAdjustment: Math.round(calorieAdjustment),
+    },
+  };
+}
 
 export default function SignUpWithEmail({ route, navigation }) {
   const { userData } = route.params;
@@ -28,36 +70,55 @@ export default function SignUpWithEmail({ route, navigation }) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
-const handleSignup = async () => {
-  if (!email || !password) {
-    Alert.alert("Missing Fields", "Please enter email and password.");
-    return;
-  }
+  const handleSignup = async () => {
+    if (!email || !password) {
+      Alert.alert("Missing Fields", "Please enter email and password.");
+      return;
+    }
 
-  setLoading(true);
+    setLoading(true);
 
-  try {
-    // Create user in Firebase Authentication
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const { uid } = userCredential.user;
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      const { uid } = userCredential.user;
 
-    // Save additional user data to Firestore
-    await setDoc(doc(db, "users", uid), {
-      uid,
-      email,
-      ...userData,
-      createdAt: new Date(),
-    });
+      // Normalize field names
+      const cleanedUserData = {
+        ...userData,
+        name: userData.name || userData["Let’s start with your name."] || "",
+        height: parseFloat(userData.height || "0"),
+        weight: parseFloat(userData.weight || "0"),
+        targetWeightChange: parseFloat(userData.targetWeightChange || "0"),
+      };
+      delete cleanedUserData["Let’s start with your name."];
 
-    Alert.alert("Success", "Your account has been created successfully!");
-    // navigation.replace("Home");  <-- Remove or comment this out
-  } catch (error) {
-  console.error("Signup error:", JSON.stringify(error, null, 2));
-  Alert.alert("Signup Error", error.message || "Something went wrong.");
-} finally {
-    setLoading(false);
-  }
-};
+      const { requiredCalories, breakdown } = calculateCalories({
+        gender: cleanedUserData.gender,
+        weight: cleanedUserData.weight,
+        height: cleanedUserData.height,
+        birthday: cleanedUserData.birthday,
+        activityLevel: cleanedUserData.activityLevel,
+        targetWeightChange: cleanedUserData.targetWeightChange,
+      });
+
+      await setDoc(doc(db, "users", uid), {
+        uid,
+        email,
+        ...cleanedUserData,
+        requiredCalories,
+        calorieBreakdown: breakdown,
+        createdAt: new Date(),
+      });
+
+      Alert.alert("Success", "Your account has been created successfully!");
+      // navigation.replace("Home");
+    } catch (error) {
+      console.error("Signup error:", JSON.stringify(error, null, 2));
+      Alert.alert("Signup Error", error.message || "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -65,10 +126,7 @@ const handleSignup = async () => {
         style={{ flex: 1, backgroundColor: "#fff" }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        <ScrollView
-          contentContainerStyle={styles.container}
-          keyboardShouldPersistTaps="handled"
-        >
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <Image
             source={require("../../../assets/android/NutriFitLogo.png")}
             style={styles.logo}

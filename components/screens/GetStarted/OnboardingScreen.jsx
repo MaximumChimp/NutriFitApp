@@ -24,9 +24,10 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 const { width } = Dimensions.get("window");
 
 const steps = [
-  "Name",
+  "Let’s start with your name.",
   "Setting Up Your Profile",
   "What is your goal?",
+  "Target Weight Change",
   "What is your Gender?",
   "What is your Activity level?",
   "Weight",
@@ -67,7 +68,7 @@ const opacityAnim = React.useRef(new Animated.Value(0)).current;
   const [currentStep, setCurrentStep] = useState(0);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [isCurrentStepValid, setIsCurrentStepValid] = useState(false);
- const [isAuthPromptVisible, setAuthPromptVisible] = useState(false);
+  const [isAuthPromptVisible, setAuthPromptVisible] = useState(false);
   const [userData, setUserData] = useState({
     Name: "",
     Age: "",
@@ -80,7 +81,11 @@ const opacityAnim = React.useRef(new Animated.Value(0)).current;
     WeightUnit: "kg",
     Activity: "",
     Goal: "",
+    TargetKg: "",           // 👈 add this
+    TargetKgUnit: "kg",     // 👈 add this
   });
+
+
 React.useEffect(() => {
   if (modalVisible || isAuthPromptVisible) {
     Animated.parallel([
@@ -147,14 +152,13 @@ const validateStep = () => {
   const key = steps[currentStep];
   const newErrors = {};
 
-  if (key === "Name" && (!userData.Name || userData.Name.trim().length < 2)) {
+  if (key === "Let’s start with your name." && (!userData.Name || userData.Name.trim().length < 2)) {
     newErrors.Name = "Please enter your Name.";
   }
 
   if (key === "What is your goal?" && !userData.Goal) {
     newErrors.Goal = "Please select your goal.";
   }
-
   if (key === "What is your Gender?" && !userData.Gender) {
     newErrors.Gender = "Please select your gender.";
   }
@@ -190,31 +194,48 @@ const validateStep = () => {
 
 
 const handleNext = () => {
-    if (!validateStep()) return;
+  if (!validateStep()) return;
 
-    if (currentStep < steps.length - 1) {
-      setCurrentStep(currentStep + 1);
-    } else {
-      const age = calculateAge(userData.Birthday);
-      let finalHeightCm = userData.Height;
+  const nextIndex = currentStep + 1;
+  const nextStep = steps[nextIndex];
 
-      if (userData.HeightUnit === "ftin") {
-        finalHeightCm = convertFtInToCm(userData.HeightFtIn);
-      }
+  // Skip "Target Weight Change" if goal is maintain
+  if (
+    steps[currentStep] === "What is your goal?" &&
+    userData.Goal === "Maintain my current weight"
+  ) {
+    setCurrentStep(nextIndex + 1); // skip Target Weight Change
+  } else if (currentStep < steps.length - 1) {
+    setCurrentStep(nextIndex);
+  } else {
+    // Final step
+    const age = calculateAge(userData.Birthday);
+    let finalHeightCm = userData.Height;
 
-      setUserData((prev) => ({
-        ...prev,
-        Age: age,
-        Height: finalHeightCm,
-        HeightUnit: "cm",
-      }));
-
-      setAuthPromptVisible(true);
+    if (userData.HeightUnit === "ftin") {
+      finalHeightCm = convertFtInToCm(userData.HeightFtIn);
     }
-  };
+
+    setUserData((prev) => ({
+      ...prev,
+      Age: age,
+      Height: finalHeightCm,
+      HeightUnit: "cm",
+    }));
+
+    setAuthPromptVisible(true);
+  }
+};
 
   const handleBack = () => {
-    if (currentStep > 0) setCurrentStep(currentStep - 1);
+     if (
+      steps[currentStep] === "What is your Gender?" &&
+      userData.Goal === "Maintain my current weight"
+      ) {
+        setCurrentStep(currentStep - 2); // go back to "What is your goal?"
+      } else if (currentStep > 0) {
+        setCurrentStep(currentStep - 1);
+      }
   };
 
   const renderGenderSelection = () => (
@@ -358,6 +379,43 @@ const handleNext = () => {
       );
     }
 
+    if (key === "Target Weight Change") {
+      let prompt = "How much weight do you want to change?";
+    if (userData.Goal === "Weight Loss") {
+      prompt = "How much weight do you want to lose?";
+    } else if (userData.Goal === "Weight Gain") {
+      prompt = "How much weight do you want to gain?";
+    }
+
+  return (
+    <>
+      <Text style={styles.subtitle}>{prompt}</Text>
+      <View style={styles.inlineRow}>
+       <TextInput
+          placeholder="Weight"
+          value={userData.TargetKg}
+          onChangeText={(text) =>
+            handleInputChange("TargetKg", text.replace(/[^0-9.]/g, ""))
+          }
+          style={styles.targetInput}
+          keyboardType="numeric"
+          placeholderTextColor="#9ca3af"
+        />
+        <View style={styles.targetPickerContainer}>
+          <Picker
+            selectedValue={userData.TargetKgUnit || "kg"}
+            onValueChange={(value) => handleInputChange("TargetKgUnit", value)}
+            style={styles.picker}
+          >
+            <Picker.Item label="kg" value="kg" />
+            <Picker.Item label="lb" value="lb" />
+          </Picker>
+        </View>
+      </View>
+    </>
+  );
+}
+
     if (key === "Weight") {
       return (
         <>
@@ -365,11 +423,14 @@ const handleNext = () => {
           <TextInput
             placeholder="Weight"
             value={userData.Weight}
-            onChangeText={(text) => handleInputChange("Weight", text)}
+            onChangeText={(text) =>
+              handleInputChange("Weight", text.replace(/[^0-9.]/g, ""))
+            }
             style={styles.weightInput}
             keyboardType="numeric"
             placeholderTextColor="#9ca3af"
           />
+
           <View style={styles.pickerContainer}>
             <Picker
               selectedValue={userData.WeightUnit}
@@ -393,11 +454,14 @@ const handleNext = () => {
             <TextInput
               placeholder="Height"
               value={userData.Height}
-              onChangeText={(text) => handleInputChange("Height", text)}
+              onChangeText={(text) =>
+                handleInputChange("Height", text.replace(/[^0-9.]/g, ""))
+              }
               style={styles.smallInput}
               keyboardType="numeric"
               placeholderTextColor="#9ca3af"
             />
+
             <View style={styles.pickerContainerFixed}>
               <Picker
                 selectedValue={userData.HeightUnit}
@@ -495,17 +559,22 @@ const handleNext = () => {
       );
     }
 
-    // Default fallback for fields like "Name"
+    let fieldKey = key;
+    let placeholder = key;
+
+    if (key === "Let’s start with your name.") {
+      fieldKey = "Name";
+      placeholder = "Enter your name here";
+    }
+
     return (
-      <>
-        <TextInput
-          placeholder={key}
-          value={userData[key]}
-          onChangeText={(text) => handleInputChange(key, text)}
-          style={styles.input}
-          placeholderTextColor="#9ca3af"
-        />
-      </>
+      <TextInput
+        placeholder={placeholder}
+        value={userData[fieldKey]}
+        onChangeText={(text) => handleInputChange(fieldKey, text)}
+        style={styles.input}
+        placeholderTextColor="#9ca3af"
+      />
     );
 
   };
@@ -565,7 +634,7 @@ const handleNext = () => {
 
         <Text style={styles.stepTitle}>{steps[currentStep]}</Text>
 
-        {steps[currentStep] === "Name" && (
+        {steps[currentStep] === "Let’s start with your name." && (
           <Text style={styles.subtitle}>
             Hi! We'd like to get to know you to make the NutriFit app
             personalized to you.
@@ -1028,5 +1097,27 @@ authEmailText: {
   fontSize: 16,
 },
 
+targetInput: {
+  width: 80,
+  height: 60,
+  borderWidth: 1,
+  borderColor: "#d1d5db",
+  borderRadius: 10,
+  paddingHorizontal: 10,
+  fontSize: 16,
+  color: "#111827",
+  textAlign: "center",
+  backgroundColor: "#f9fafb",
+},
+
+targetPickerContainer: {
+  borderWidth: 1,
+  borderColor: "#d1d5db",
+  borderRadius: 10,
+  backgroundColor: "#f3f4f6",
+  width: 100,
+  height: 60,
+  justifyContent: "center",
+},
 
 });
