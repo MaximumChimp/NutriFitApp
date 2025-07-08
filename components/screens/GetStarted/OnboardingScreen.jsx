@@ -14,6 +14,8 @@ import {
   Alert,
   Modal,
   Platform,
+  Animated, 
+  Easing
 } from "react-native";
 import { Picker } from "@react-native-picker/picker";
 import { Ionicons } from "@expo/vector-icons";
@@ -53,11 +55,13 @@ const convertFtInToCm = (ftInStr) => {
   const inches = parseInt(match[2]);
   const totalInches = feet * 12 + inches;
   const cm = totalInches * 2.54;
-
   return cm.toFixed(1); 
 };
 
 export default function OnboardingScreen({ navigation }) {
+  const scaleAnim = React.useRef(new Animated.Value(0.8)).current;
+const opacityAnim = React.useRef(new Animated.Value(0)).current;
+
   const [agreed, setAgreed] = useState(null);
   const [modalVisible, setModalVisible] = useState(true);
   const [currentStep, setCurrentStep] = useState(0);
@@ -77,7 +81,45 @@ export default function OnboardingScreen({ navigation }) {
     Activity: "",
     Goal: "",
   });
+React.useEffect(() => {
+  if (modalVisible || isAuthPromptVisible) {
+    Animated.parallel([
+      Animated.timing(scaleAnim, {
+        toValue: 1,
+        duration: 300,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }),
+      Animated.timing(opacityAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  } else {
+    scaleAnim.setValue(0.8);
+    opacityAnim.setValue(0);
+  }
+}, [modalVisible, isAuthPromptVisible]);
 
+
+//   React.useEffect(() => {
+//   if (modalVisible) {
+//     Animated.parallel([
+//       Animated.timing(scaleAnim, {
+//         toValue: 1,
+//         duration: 300,
+//         useNativeDriver: true,
+//         easing: Easing.out(Easing.exp),
+//       }),
+//       Animated.timing(opacityAnim, {
+//         toValue: 1,
+//         duration: 300,
+//         useNativeDriver: true,
+//       }),
+//     ]).start();
+//   }
+// }, [modalVisible]);
 
   const handleAgree = () => {
     setAgreed(true);
@@ -153,7 +195,6 @@ const handleNext = () => {
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
-      // ✅ Last step: Calculate age & convert height to cm
       const age = calculateAge(userData.Birthday);
       let finalHeightCm = userData.Height;
 
@@ -473,30 +514,39 @@ const handleNext = () => {
 
   return (
     <>
-      <Modal visible={modalVisible} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.title}>Before you get started</Text>
-            <Text style={styles.consentText}>
-              We collect your information (age, height, weight, etc.) solely for
-              the purpose of calculating your personalized calorie and nutrition
-              goals. Your data is stored securely and never shared with third
-              parties.
-            </Text>
-            <View style={styles.consentButtons}>
-              <TouchableOpacity style={styles.agreeButton} onPress={handleAgree}>
-                <Text style={styles.agreeText}>Agree</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.disagreeButton}
-                onPress={handleDisagree}
-              >
-                <Text style={styles.disagreeText}>Not agree</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <Modal visible={modalVisible} transparent animationType="none">
+  <View style={styles.modalOverlay}>
+    <Animated.View
+      style={[
+        styles.modalContent,
+        {
+          transform: [{ scale: scaleAnim }],
+          opacity: opacityAnim,
+        },
+      ]}
+    >
+      <Text style={styles.title}>Before you get started</Text>
+      <Text style={styles.consentText}>
+        We collect your information (age, height, weight, etc.) solely for
+        the purpose of calculating your personalized calorie and nutrition
+        goals. Your data is stored securely and never shared with third
+        parties.
+      </Text>
+      <View style={styles.consentButtons}>
+        <TouchableOpacity style={styles.agreeButton} onPress={handleAgree}>
+          <Text style={styles.agreeText}>Agree</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.disagreeButton}
+          onPress={handleDisagree}
+        >
+          <Text style={styles.disagreeText}>Not agree</Text>
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
+  </View>
+</Modal>
+
 
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.topRow}>
@@ -536,49 +586,59 @@ const handleNext = () => {
 
       </ScrollView>
 
-  <Modal visible={isAuthPromptVisible} animationType="slide" transparent>
-    <View style={styles.authModalOverlay}>
-      <View style={styles.authModalContent}>
-        <Text style={styles.authTitle}>Create your NutriFit account</Text>
-        <Text style={styles.authText}>
-          Sign up to save your progress and start tracking your calories.
-        </Text>
+<Modal visible={isAuthPromptVisible} transparent animationType="none">
+  <View style={styles.authModalOverlay}>
+    <Animated.View
+      style={[
+        styles.authModalContent,
+        {
+          transform: [{ scale: scaleAnim }],
+          opacity: opacityAnim,
+        },
+      ]}
+    >
+      <Text style={styles.authTitle}>Create your NutriFit account</Text>
+      <Text style={styles.authText}>
+        Sign up to save your progress and start tracking your calories.
+      </Text>
 
-        <TouchableOpacity
-          style={[styles.authGreenButton, { marginBottom: 20 }]}
-          onPress={() => {
-            setAuthPromptVisible(false);
-            navigation.navigate("SignUpWithEmail", { userData});
-          }}
-        >
-          <View style={styles.googleRow}>
-           <Ionicons name="mail-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
-            <Text style={styles.authGreenButtonText}>Sign up with Email</Text>
-          </View>
-        </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.authGreenButton, { marginBottom: 20 }]}
+        onPress={() => {
+          setAuthPromptVisible(false);
+          navigation.navigate("SignUpWithEmail", { userData });
+        }}
+      >
+        <View style={styles.googleRow}>
+          <Ionicons
+            name="mail-outline"
+            size={20}
+            color="#fff"
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.authGreenButtonText}>Sign up with Email</Text>
+        </View>
+      </TouchableOpacity>
 
+      <TouchableOpacity
+        style={styles.authGoogleButton}
+        onPress={() => {
+          setAuthPromptVisible(false);
+          navigation.navigate("GoogleSignIn", { userData });
+        }}
+      >
+        <View style={styles.googleRow}>
+          <Image
+            source={require("../../../assets/googlelogo.png")}
+            style={[styles.googleLogo, { marginRight: 8 }]}
+          />
+          <Text style={styles.disagreeText}>Continue with Google</Text>
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  </View>
+</Modal>
 
-
-        <TouchableOpacity
-          style={styles.authGoogleButton}
-          onPress={() => {
-            setAuthPromptVisible(false);
-            navigation.navigate("GoogleSignIn", { userData });
-          }}
-
-        >
-          <View style={styles.googleRow}>
-            <Image
-                source={require("../../../assets/googlelogo.png")}
-                style={[styles.googleLogo, { marginRight: 8 }]}
-            />
-            <Text style={styles.disagreeText}>Continue with Google</Text>
-          </View>
-        </TouchableOpacity>
-
-      </View>
-    </View>
-  </Modal>
 
 
     </>
@@ -627,7 +687,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   agreeText: {
-    color: "black",
+    color: "#ffff",
     fontWeight: "600",
     fontSize: 16
   },
@@ -869,8 +929,8 @@ const styles = StyleSheet.create({
 authModalOverlay: {
   flex: 1,
   backgroundColor: "rgba(0,0,0,0.7)",
-  justifyContent: "center",
-  alignItems: "center",
+  justifyContent: "center",   
+  alignItems: "center",      
   padding: 24,
 },
 
@@ -879,7 +939,9 @@ authModalContent: {
   borderRadius: 20,
   padding: 30,
   width: "100%",
+  maxWidth: 400,             
   elevation: 12,
+  alignItems: "center",     
 },
 
 authTitle: {
@@ -914,14 +976,17 @@ authButtonText: {
   color: "#111827",
   fontWeight: "600",
   marginLeft: 8,
-},authGreenButton: {
+},
+authGreenButton: {
   flexDirection: "row",
   alignItems: "center",
   justifyContent: "center",
   padding: 14,
   borderRadius: 10,
-  backgroundColor: "#22c55e", // green
+  backgroundColor: "#22c55e",
   marginTop: 10,
+  width: "100%",      
+  maxWidth: 400,         
 },
 
 authGreenButtonText: {
@@ -941,6 +1006,8 @@ googleButton: {
   paddingHorizontal: 16,
   borderRadius: 8,
   marginTop: 10,
+  width: "100%",     
+  maxWidth: 400
 },
 
 googleLogo: {

@@ -12,7 +12,6 @@ import SplashScreen from './components/screens/Splashscreen/SplashScreen';
 import Login from './components/screens/LandingPage/LandingPage';
 import GetStarted from './components/screens/GetStarted/OnboardingScreen'; // renamed correctly
 import SignUpWithEmail from './components/screens/GetStarted/SignUpWithEmail';
-
 const Stack = createNativeStackNavigator();
 
 export default function App() {
@@ -34,7 +33,8 @@ export default function App() {
             <>
               <Stack.Screen name="Login" component={Login} />
               <Stack.Screen name="GetStarted" component={GetStarted} />
-             <Stack.Screen
+              <Stack.Screen name="SignUpWithEmail" component={SignUpWithEmail} />
+             {/* <Stack.Screen
               name="SignUpWithEmail"
               component={SignUpWithEmail}
               options={{
@@ -43,7 +43,7 @@ export default function App() {
                 gestureEnabled: true,  // Allow swipe to close on iOS
                 headerShown: false     // Optional: hide header for cleaner look
               }}
-            />
+              /> */}
 
             </>
           )}

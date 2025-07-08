@@ -3,6 +3,9 @@
     "name": "NutriFit",
     "slug": "NutriFit",
     "version": "1.0.0",
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
     "orientation": "portrait",
     "icon": "./assets/android/NutriFitLogo.png",
     "userInterfaceStyle": "light",
@@ -11,7 +14,7 @@
       "image": "./assets/android/NutriFitLogo.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
-    },                           
+    },
     "ios": {
       "supportsTablet": true
     },
@@ -20,10 +23,17 @@
         "foregroundImage": "./assets/android/NutriFitLogo.png",
         "backgroundColor": "transparent"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.maximumchimp.NutriFit"
     },
     "web": {
       "favicon": "./assets/android/NutriFitLogo.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "3351475d-5e3e-4afa-8a3c-319d45f8fc07"
+      }
+    },
+    "owner": "maximumchimp"
   }
 }

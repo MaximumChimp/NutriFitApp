@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Image, Text, Animated } from 'react-native';
+import { View, Image, Text, Animated,Modal, Pressable } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Updates from 'expo-updates';
 
 const SplashScreen = () => {
+  
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -11,6 +13,7 @@ const SplashScreen = () => {
 
   const progressAnim = useRef(new Animated.Value(0)).current;
   const [progress, setProgress] = useState(0);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
 
   const messages = [
     'Initializing...',
@@ -21,60 +24,115 @@ const SplashScreen = () => {
   const [statusMsg, setStatusMsg] = useState(messages[0]);
 
   useEffect(() => {
-    // Logo animation
+  // Logo animation
+  Animated.parallel([
+    Animated.timing(scaleAnim, {
+      toValue: 1,
+      duration: 1000,
+      useNativeDriver: true,
+    }),
+    Animated.timing(opacityAnim, {
+      toValue: 1,
+      duration: 1000,
+      useNativeDriver: true,
+    }),
+  ]).start();
+
+  // Partnership badge animation
+  setTimeout(() => {
     Animated.parallel([
-      Animated.timing(scaleAnim, {
+      Animated.timing(badgeOpacity, {
         toValue: 1,
-        duration: 1000,
+        duration: 600,
         useNativeDriver: true,
       }),
-      Animated.timing(opacityAnim, {
-        toValue: 1,
-        duration: 1000,
+      Animated.timing(badgeTranslateY, {
+        toValue: 0,
+        duration: 600,
         useNativeDriver: true,
       }),
     ]).start();
+  }, 1200);
 
-    // Partnership badge animation
-    setTimeout(() => {
-      Animated.parallel([
-        Animated.timing(badgeOpacity, {
-          toValue: 1,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        Animated.timing(badgeTranslateY, {
-          toValue: 0,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }, 1200);
+  // OTA update check
+  const checkForOTAUpdate = async () => {
+    try {
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        setUpdateAvailable(true); // Show the modal
+      }
+    } catch (e) {
+      console.log('Update check failed:', e);
+    }
+  };
+  checkForOTAUpdate();
 
-    // Progress simulation
-    let current = 0;
-    const interval = setInterval(() => {
-      current += 1;
-      setProgress(current);
-      progressAnim.setValue(current);
-      if (current >= 100) clearInterval(interval);
-    }, 30);
+  // Progress simulation
+  let current = 0;
+  const interval = setInterval(() => {
+    current += 1;
+    setProgress(current);
+    progressAnim.setValue(current);
+    if (current >= 100) clearInterval(interval);
+  }, 30);
 
-    // Rotate status messages
-    const msgInterval = setInterval(() => {
-      setStatusMsg((prev) => {
-        const nextIndex = (messages.indexOf(prev) + 1) % messages.length;
-        return messages[nextIndex];
-      });
-    }, 1000);
+  // Rotate status messages
+  const msgInterval = setInterval(() => {
+    setStatusMsg((prev) => {
+      const nextIndex = (messages.indexOf(prev) + 1) % messages.length;
+      return messages[nextIndex];
+    });
+  }, 1000);
 
-    return () => {
-      clearInterval(interval);
-      clearInterval(msgInterval);
-    };
+  return () => {
+    clearInterval(interval);
+    clearInterval(msgInterval);
+  };
   }, []);
 
+
   return (
+    <>
+    <Modal
+  transparent
+  animationType="fade"
+  visible={updateAvailable}
+  onRequestClose={() => {}}
+>
+  <View className="flex-1 bg-black/60 justify-center items-center px-6">
+    <View className="bg-white p-6 rounded-2xl w-full max-w-md">
+      <Text className="text-lg font-bold mb-2 text-center">
+        Update Available
+      </Text>
+      <Text className="text-gray-600 text-center mb-4">
+        A new version of the app is available. Would you like to update now?
+      </Text>
+
+      <View className="flex-row justify-around mt-2">
+        <Pressable
+          onPress={() => setUpdateAvailable(false)}
+          className="bg-gray-300 px-4 py-2 rounded-xl"
+        >
+          <Text className="text-gray-800 font-semibold">Later</Text>
+        </Pressable>
+        <Pressable
+          onPress={async () => {
+            try {
+              await Updates.fetchUpdateAsync();
+              await Updates.reloadAsync();
+            } catch (e) {
+              console.log('Update failed', e);
+            }
+          }}
+          className="bg-green-600 px-4 py-2 rounded-xl"
+        >
+          <Text className="text-white font-semibold">Update</Text>
+        </Pressable>
+      </View>
+    </View>
+  </View>
+</Modal>
+
     <LinearGradient
       colors={['#d4fc79', '#96e6a1']}
       className="flex-1 justify-between items-center"
@@ -139,6 +197,7 @@ const SplashScreen = () => {
         </View>
       </Animated.View>
     </LinearGradient>
+    </>
   );
 };
 

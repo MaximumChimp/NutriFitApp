@@ -1,7 +1,11 @@
 // config/firebase-config.js
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { initializeAuth, getReactNativePersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import {
+  getAuth,
+  initializeAuth,
+  getReactNativePersistence,
+} from "firebase/auth/react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const firebaseConfig = {
@@ -10,18 +14,24 @@ const firebaseConfig = {
   projectId: "nutrifit-d98f5",
   storageBucket: "nutrifit-d98f5.appspot.com",
   messagingSenderId: "443385573457",
-  appId: "1:443385573457:web:a81c4a80df6d5251af8870"
+  appId: "1:443385573457:web:a81c4a80df6d5251af8870",
 };
 
-// ✅ Prevent duplicate app init
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+let app;
+let auth;
 
-// ✅ Auth with AsyncStorage persistence
-const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(AsyncStorage),
-});
+if (getApps().length === 0) {
+  app = initializeApp(firebaseConfig);
 
-// ✅ Firestore properly initialized
+  // ✅ Only initializeAuth once
+  auth = initializeAuth(app, {
+    persistence: getReactNativePersistence(AsyncStorage),
+  });
+} else {
+  app = getApp();
+  auth = getAuth(app);
+}
+
 const db = getFirestore(app);
 
 export { app, auth, db };

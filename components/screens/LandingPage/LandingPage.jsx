@@ -47,26 +47,20 @@ export default function LandingPage({ navigation }) {
       />
 
       {/* Animated Welcome Text */}
-      <Animated.Text style={[styles.title, { opacity: logoOpacity }]}>
+      {/* <Animated.Text style={[styles.title, { opacity: logoOpacity }]}>
         NutriFit
-      </Animated.Text>
+      </Animated.Text> */}
       <Animated.Text style={[styles.subtitle, { opacity: logoOpacity }]}>
         Take it , Eat it , Reach it with NutriFit
       </Animated.Text>
 
       {/* Animated Buttons */}
       <Animated.View
-        style={[
-          styles.buttonGroup,
-          {
-            opacity: buttonOpacity,
-            transform: [{ translateY: buttonTranslateY }],
-          },
-        ]}
       >
         <TouchableOpacity
           style={styles.primaryButton}
            onPress={() => navigation.navigate("GetStarted")}
+           
         >
           <Text style={styles.primaryButtonText}>I am a new user</Text>
         </TouchableOpacity>
@@ -104,7 +98,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     color: "#6b7280",
-    marginBottom: 40,
+    marginBottom: 20,
     textAlign: "center",
   },
   buttonGroup: {
@@ -115,12 +109,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     borderRadius: 10,
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 12  
   },
   primaryButtonText: {
     color: "#fff",
     fontSize: 16,
-    fontWeight: "bold",
+    fontWeight: "bold"
   },
   secondaryButton: {
     borderWidth: 2,
@@ -133,5 +127,6 @@ const styles = StyleSheet.create({
     color: "#22c55e",
     fontSize: 16,
     fontWeight: "bold",
+    paddingHorizontal:10
   },
 });
