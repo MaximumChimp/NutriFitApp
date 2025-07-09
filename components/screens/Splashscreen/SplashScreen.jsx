@@ -178,7 +178,7 @@ const SplashScreen = () => {
 
       {/* Bottom Partnership Section */}
       <Animated.View
-        className="w-full items-center pb-6"
+        className="w-full items-center pb-28"
         style={{
           opacity: badgeOpacity,
           transform: [{ translateY: badgeTranslateY }],

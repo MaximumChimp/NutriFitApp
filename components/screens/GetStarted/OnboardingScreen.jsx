@@ -144,33 +144,59 @@ React.useEffect(() => {
   };
 
   React.useEffect(() => {
-    const isValid = validateStep();
-    setIsCurrentStepValid(isValid);
-  }, [userData, currentStep]);
+  const isValid = validateStep(false);  // disable alerts
+  setIsCurrentStepValid(isValid);
+}, [userData, currentStep]);
 
-const validateStep = () => {
+const validateStep = (showAlerts = true) => {
   const key = steps[currentStep];
   const newErrors = {};
 
   if (key === "Let’s start with your name." && (!userData.Name || userData.Name.trim().length < 2)) {
-    newErrors.Name = "Please enter your Name.";
+    if (showAlerts) Alert.alert("Invalid Input", "Please enter your name.");
+    return false;
   }
 
   if (key === "What is your goal?" && !userData.Goal) {
-    newErrors.Goal = "Please select your goal.";
+    if (showAlerts) Alert.alert("Invalid Input", "Please select your goal.");
+    return false;
   }
+
+  if (key === "Target Weight Change") {
+    const target = parseFloat(userData.TargetKg || "0");
+    if (!target || target <= 0) {
+      if (showAlerts) Alert.alert("Invalid Input", "Please enter a valid target weight.");
+      return false;
+    }
+  }
+
   if (key === "What is your Gender?" && !userData.Gender) {
-    newErrors.Gender = "Please select your gender.";
+    if (showAlerts) Alert.alert("Invalid Input", "Please select your gender.");
+    return false;
   }
 
   if (key === "What is your Activity level?" && !userData.Activity) {
-    newErrors.Activity = "Please select your activity level.";
+    if (showAlerts) Alert.alert("Invalid Input", "Please select your activity level.");
+    return false;
   }
 
   if (key === "Weight") {
     const weight = parseFloat(userData.Weight);
+    const target = parseFloat(userData.TargetKg);
+
     if (!weight || weight < 20 || weight > 500) {
-      newErrors.Weight = "Please enter a valid weight.";
+      if (showAlerts) Alert.alert("Invalid Input", "Please enter a valid weight.");
+      return false;
+    }
+
+    if (userData.Goal === "Weight Loss" && target >= weight) {
+      if (showAlerts) Alert.alert("Invalid Target", "For weight loss, your target weight must be lower than your current weight.");
+      return false;
+    }
+
+    if (userData.Goal === "Weight Gain" && target <= weight) {
+      if (showAlerts) Alert.alert("Invalid Target", "For weight gain, your target weight must be higher than your current weight.");
+      return false;
     }
   }
 
@@ -178,53 +204,55 @@ const validateStep = () => {
     if (userData.HeightUnit === "cm") {
       const height = parseFloat(userData.Height);
       if (!height || height < 50 || height > 300) {
-        newErrors.Height = "Enter a valid height in cm.";
+        if (showAlerts) Alert.alert("Invalid Input", "Enter a valid height in cm.");
+        return false;
       }
     } else if (!userData.HeightFtIn) {
-      newErrors.HeightFtIn = "Select your height in ft/in.";
+      if (showAlerts) Alert.alert("Invalid Input", "Select your height in ft/in.");
+      return false;
     }
   }
 
   if (key === "When is your Birthday?" && !userData.Birthday) {
-    newErrors.Birthday = "Please select your birthday.";
+    if (showAlerts) Alert.alert("Invalid Input", "Please select your birthday.");
+    return false;
   }
 
-  return Object.keys(newErrors).length === 0;
+  return true;
 };
 
 
+
 const handleNext = () => {
-  if (!validateStep()) return;
+  const key = steps[currentStep];
 
-  const nextIndex = currentStep + 1;
-  const nextStep = steps[nextIndex];
+  if (!validateStep(true)) return; // now alerts only show when "Next" is clicked
 
-  // Skip "Target Weight Change" if goal is maintain
-  if (
-    steps[currentStep] === "What is your goal?" &&
-    userData.Goal === "Maintain my current weight"
-  ) {
-    setCurrentStep(nextIndex + 1); // skip Target Weight Change
-  } else if (currentStep < steps.length - 1) {
-    setCurrentStep(nextIndex);
-  } else {
-    // Final step
-    const age = calculateAge(userData.Birthday);
-    let finalHeightCm = userData.Height;
-
-    if (userData.HeightUnit === "ftin") {
-      finalHeightCm = convertFtInToCm(userData.HeightFtIn);
-    }
-
-    setUserData((prev) => ({
-      ...prev,
-      Age: age,
-      Height: finalHeightCm,
-      HeightUnit: "cm",
-    }));
-
-    setAuthPromptVisible(true);
+  if (key === "What is your goal?" && userData.Goal === "Maintain my current weight") {
+    setCurrentStep(currentStep + 2);
+    return;
   }
+
+  if (currentStep < steps.length - 1) {
+    setCurrentStep(currentStep + 1);
+    return;
+  }
+
+  const age = calculateAge(userData.Birthday);
+  let finalHeightCm = userData.Height;
+
+  if (userData.HeightUnit === "ftin") {
+    finalHeightCm = convertFtInToCm(userData.HeightFtIn);
+  }
+
+  setUserData((prev) => ({
+    ...prev,
+    Age: age,
+    Height: finalHeightCm,
+    HeightUnit: "cm",
+  }));
+
+  setAuthPromptVisible(true);
 };
 
   const handleBack = () => {
@@ -380,11 +408,11 @@ const handleNext = () => {
     }
 
     if (key === "Target Weight Change") {
-      let prompt = "How much weight do you want to change?";
+      let prompt = "What's your target weight?";
     if (userData.Goal === "Weight Loss") {
-      prompt = "How much weight do you want to lose?";
+      prompt = "Let’s set your target weight for your weight loss goal";
     } else if (userData.Goal === "Weight Gain") {
-      prompt = "How much weight do you want to gain?";
+      prompt = "Let’s set your target weight for your gain journey.";
     }
 
   return (

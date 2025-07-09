@@ -9,9 +9,11 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import SplashScreen from './components/screens/Splashscreen/SplashScreen';
-import Login from './components/screens/LandingPage/LandingPage';
+import LandingScreen from './components/screens/LandingPage/LandingPage';
 import GetStarted from './components/screens/GetStarted/OnboardingScreen'; // renamed correctly
 import SignUpWithEmail from './components/screens/GetStarted/SignUpWithEmail';
+import LoginScreen from './components/screens/GetStarted/Login';
+import HomeScreen from './components/screens/Home/HomeScreen';
 const Stack = createNativeStackNavigator();
 
 export default function App() {
@@ -31,9 +33,11 @@ export default function App() {
             <Stack.Screen name="Splash" component={SplashScreen} />
           ) : (
             <>
-              <Stack.Screen name="Login" component={Login} />
+              <Stack.Screen name="Landing" component={LandingScreen} />
               <Stack.Screen name="GetStarted" component={GetStarted} />
               <Stack.Screen name="SignUpWithEmail" component={SignUpWithEmail} />
+              <Stack.Screen name="Login" component={LoginScreen} />
+              <Stack.Screen name="Home" component={HomeScreen} />
              {/* <Stack.Screen
               name="SignUpWithEmail"
               component={SignUpWithEmail}
