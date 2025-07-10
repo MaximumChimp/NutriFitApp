@@ -5,52 +5,64 @@ import { GluestackUIProvider } from "@/components/ui/gluestack-ui-provider";
 import { config } from "@/gluestack-ui.config";
 import { StyleSheet } from 'react-native';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import SplashScreen from './components/screens/Splashscreen/SplashScreen';
 import LandingScreen from './components/screens/LandingPage/LandingPage';
-import GetStarted from './components/screens/GetStarted/OnboardingScreen'; // renamed correctly
+import GetStarted from './components/screens/GetStarted/OnboardingScreen';
 import SignUpWithEmail from './components/screens/GetStarted/SignUpWithEmail';
 import LoginScreen from './components/screens/GetStarted/Login';
 import HomeScreen from './components/screens/Home/HomeScreen';
+import ProfileScreen from './components/screens/Home/ProfileScreen';
+import MainTabs from './components/navigation/MainTabs';
+
+import { auth } from './config/firebase-config';
+import { onAuthStateChanged } from 'firebase/auth';
+
 const Stack = createNativeStackNavigator();
 
 export default function App() {
-  const [showSplash, setShowSplash] = useState(true);
+  const [splashVisible, setSplashVisible] = useState(true);
+  const [initialRoute, setInitialRoute] = useState(null);
 
   useEffect(() => {
-    const timer = setTimeout(() => setShowSplash(false), 3000);
-    return () => clearTimeout(timer);
+    const checkAuthState = async () => {
+      const hasLaunched = await AsyncStorage.getItem('hasLaunched');
+
+      const unsubscribe = onAuthStateChanged(auth, async (user) => {
+        if (!hasLaunched) {
+          await AsyncStorage.setItem('hasLaunched', 'true');
+          setInitialRoute('Landing');
+        } else if (!user) {
+          setInitialRoute('Login');
+        } else {
+          setInitialRoute('MainTabs');
+        }
+
+        setSplashVisible(false);
+      });
+
+      return () => unsubscribe();
+    };
+
+    checkAuthState();
   }, []);
+
+  if (splashVisible || !initialRoute) return <SplashScreen />;
 
   return (
     <GluestackUIProvider config={config}>
       <StatusBar style="auto" />
       <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          {showSplash ? (
-            <Stack.Screen name="Splash" component={SplashScreen} />
-          ) : (
-            <>
-              <Stack.Screen name="Landing" component={LandingScreen} />
-              <Stack.Screen name="GetStarted" component={GetStarted} />
-              <Stack.Screen name="SignUpWithEmail" component={SignUpWithEmail} />
-              <Stack.Screen name="Login" component={LoginScreen} />
-              <Stack.Screen name="Home" component={HomeScreen} />
-             {/* <Stack.Screen
-              name="SignUpWithEmail"
-              component={SignUpWithEmail}
-              options={{
-                animation: 'fade_from_bottom',
-                presentation: 'modal', // Makes it feel like a smooth popup
-                gestureEnabled: true,  // Allow swipe to close on iOS
-                headerShown: false     // Optional: hide header for cleaner look
-              }}
-              /> */}
-
-            </>
-          )}
+        <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
+          <Stack.Screen name="Landing" component={LandingScreen} />
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="GetStarted" component={GetStarted} />
+          <Stack.Screen name="SignUpWithEmail" component={SignUpWithEmail} />
+          <Stack.Screen name="MainTabs" component={MainTabs} />
+          <Stack.Screen name="Profile" component={ProfileScreen} />
         </Stack.Navigator>
       </NavigationContainer>
     </GluestackUIProvider>

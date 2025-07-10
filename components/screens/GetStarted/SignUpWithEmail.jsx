@@ -149,6 +149,7 @@ export default function SignUpWithEmail({ route, navigation }) {
     const { uid } = userCredential.user;
 
     const cleanedUserData = {
+      Name:userData.Name,
       Gender: userData.Gender,
       Age: parseInt(userData.Age || "0"),
       Goal: userData.Goal, 
@@ -168,7 +169,7 @@ export default function SignUpWithEmail({ route, navigation }) {
       calorieBreakdown: breakdown,
       createdAt: new Date(),
     });
-    navigation.replace("Home");
+    navigation.replace("MainTabs");
 
   } catch (error) {
     console.error("Signup error:", error);

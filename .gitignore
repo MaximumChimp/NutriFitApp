@@ -35,3 +35,7 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+
+# Native project folders (ignored if using Expo Prebuild/Managed workflow)
+# android/
+# ios/

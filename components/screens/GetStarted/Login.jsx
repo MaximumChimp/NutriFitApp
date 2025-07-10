@@ -59,7 +59,7 @@ export default function LoginScreen({ navigation }) {
     try {
       await signInWithEmailAndPassword(auth, email, password);
       // ✅ Navigate to home or dashboard
-      navigation.replace("Home");
+      navigation.replace("MainTabs");
     } catch (error) {
       console.error("Login error:", error);
       if (error.code === "auth/user-not-found") {
@@ -126,11 +126,11 @@ export default function LoginScreen({ navigation }) {
             {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log In</Text>}
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => navigation.navigate("SignUpWithEmail")}>
+          <TouchableOpacity onPress={() => navigation.navigate("GetStarted", { fromLogin: true })}>
             <Text style={{ color: "#22c55e", textAlign: "center", marginTop: 16 }}>
               Don’t have an account? Sign up
             </Text>
-          </TouchableOpacity>
+          </TouchableOpacity>  
         </ScrollView>
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>

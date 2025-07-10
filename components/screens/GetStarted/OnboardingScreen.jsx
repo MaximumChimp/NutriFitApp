@@ -20,8 +20,13 @@ import {
 import { Picker } from "@react-native-picker/picker";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { useRoute } from "@react-navigation/native";
+import { useEffect } from "react";
 
 const { width } = Dimensions.get("window");
+
+
+
 
 const steps = [
   "Let’s start with your name.",
@@ -62,7 +67,7 @@ const convertFtInToCm = (ftInStr) => {
 export default function OnboardingScreen({ navigation }) {
   const scaleAnim = React.useRef(new Animated.Value(0.8)).current;
 const opacityAnim = React.useRef(new Animated.Value(0)).current;
-
+  
   const [agreed, setAgreed] = useState(null);
   const [modalVisible, setModalVisible] = useState(true);
   const [currentStep, setCurrentStep] = useState(0);
@@ -81,10 +86,11 @@ const opacityAnim = React.useRef(new Animated.Value(0)).current;
     WeightUnit: "kg",
     Activity: "",
     Goal: "",
-    TargetKg: "",           // 👈 add this
-    TargetKgUnit: "kg",     // 👈 add this
+    TargetKg: "",          
+    TargetKgUnit: "kg",     
   });
-
+  const route = useRoute();
+const cameFromLogin = route.params?.fromLogin === true;
 
 React.useEffect(() => {
   if (modalVisible || isAuthPromptVisible) {
@@ -135,7 +141,11 @@ React.useEffect(() => {
   const handleDisagree = () => {
     setModalVisible(false);
     setTimeout(() => {
-      navigation.replace("Login");
+      if (cameFromLogin) {
+        navigation.replace("Login"); 
+      } else {
+        navigation.replace("Landing"); 
+      }
     }, 300);
   };
 

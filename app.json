@@ -4,14 +4,15 @@
     "slug": "NutriFit",
     "version": "1.0.0",
     "updates": {
-      "fallbackToCacheTimeout": 0
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/3351475d-5e3e-4afa-8a3c-319d45f8fc07"
     },
     "orientation": "portrait",
-    "icon": "./assets/android/NutriFitLogo.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/android/NutriFitLogo.png",
+      "image": "./assets/icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -20,20 +21,31 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/android/NutriFitLogo.png",
-        "backgroundColor": "transparent"
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#FFFFFF"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.maximumchimp.NutriFit"
+      "package": "com.maximumchimp.NutriFit",
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "NOTIFICATIONS",
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "NOTIFICATIONS"
+      ]
     },
     "web": {
-      "favicon": "./assets/android/NutriFitLogo.png"
+      "favicon": "./assets/icon.png"
     },
     "extra": {
       "eas": {
         "projectId": "3351475d-5e3e-4afa-8a3c-319d45f8fc07"
       }
     },
-    "owner": "maximumchimp"
+    "owner": "maximumchimp",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
   }
 }
