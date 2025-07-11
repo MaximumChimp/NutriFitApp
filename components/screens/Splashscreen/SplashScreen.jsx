@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Updates from 'expo-updates';
+import NetInfo from '@react-native-community/netinfo';
 
 const SplashScreen = () => {
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
@@ -30,7 +31,7 @@ const SplashScreen = () => {
   ];
 
   useEffect(() => {
-    // Animate logo
+    // Logo animation
     Animated.parallel([
       Animated.timing(scaleAnim, {
         toValue: 1,
@@ -44,7 +45,7 @@ const SplashScreen = () => {
       }),
     ]).start();
 
-    // Animate partnership badge
+    // Partnership badge animation
     setTimeout(() => {
       Animated.parallel([
         Animated.timing(badgeOpacity, {
@@ -60,31 +61,37 @@ const SplashScreen = () => {
       ]).start();
     }, 1200);
 
-    // Check for OTA update
-    const checkForOTAUpdate = async () => {
-      try {
-        const update = await Updates.checkForUpdateAsync();
-        if (update.isAvailable) {
-          setUpdateAvailable(true);
+    // OTA Update check only if online
+    const checkOTAUpdateIfOnline = async () => {
+      const state = await NetInfo.fetch();
+      if (state.isConnected) {
+        try {
+          const update = await Updates.checkForUpdateAsync();
+          if (update.isAvailable) {
+            setUpdateAvailable(true);
+          }
+        } catch (e) {
+          console.log('OTA check failed:', e);
         }
-      } catch (e) {
-        console.log('Update check failed:', e);
       }
     };
-    checkForOTAUpdate();
+    checkOTAUpdateIfOnline();
 
-    // Progress animation
+    // Accurate progress loader
     let current = 0;
     const interval = setInterval(() => {
       current += 1;
+      if (current > 100) {
+        current = 100;
+        clearInterval(interval);
+      }
       setProgress(current);
       progressAnim.setValue(current);
-      if (current >= 100) clearInterval(interval);
     }, 30);
 
-    // Rotate status messages
+    // Rotating status messages
     const msgInterval = setInterval(() => {
-      setStatusMsg((prev) => {
+      setStatusMsg(prev => {
         const nextIndex = (messages.indexOf(prev) + 1) % messages.length;
         return messages[nextIndex];
       });
@@ -98,7 +105,7 @@ const SplashScreen = () => {
 
   return (
     <>
-      {/* Modal for updates */}
+      {/* Modal for OTA update */}
       <Modal transparent visible={updateAvailable} animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
@@ -160,6 +167,7 @@ const SplashScreen = () => {
                   width: progressAnim.interpolate({
                     inputRange: [0, 100],
                     outputRange: ['0%', '100%'],
+                    extrapolate: 'clamp',
                   }),
                 },
               ]}
@@ -167,7 +175,9 @@ const SplashScreen = () => {
           </View>
 
           {/* Status Message */}
-          <Text style={styles.statusText}>{statusMsg} {progress}%</Text>
+          <Text style={styles.statusText}>
+            {statusMsg} {Math.min(progress, 100)}%
+          </Text>
         </View>
 
         {/* Partner Section */}

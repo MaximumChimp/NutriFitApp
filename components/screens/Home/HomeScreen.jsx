@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import Loader from "./Loader";
 import {
   View,
   Text,
@@ -7,27 +8,34 @@ import {
   ScrollView,
   ActivityIndicator,
   Platform,
-  Image
-  
+  Image,
+  TouchableWithoutFeedback
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Svg, { Circle } from "react-native-svg";
 import Animated, {
   useSharedValue,
   useAnimatedProps,
-  withTiming,
+  withTiming, 
+  useAnimatedStyle,
+  runOnJS 
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import { auth, db } from "@/config/firebase-config";
-import { doc, getDoc, collection, getDocs } from "firebase/firestore";
-
+import { doc, getDoc, collection, getDocs,addDoc} from "firebase/firestore";
+import { Dimensions } from "react-native";
+const screenWidth = Dimensions.get("window").width;
+const CARD_WIDTH = screenWidth - 48;
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { getAuth } from 'firebase/auth';
+import { Alert } from 'react-native';
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 const SIZE = 100;
 const STROKE_WIDTH = 4;
 const RADIUS = (SIZE - STROKE_WIDTH) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
-
+const SIDEBAR_WIDTH = 280;
 function CircleProgress({ percent = 0, color = "#22c55e", value,target, label }) {
   const animatedProgress = useSharedValue(0);
 
@@ -42,7 +50,18 @@ function CircleProgress({ percent = 0, color = "#22c55e", value,target, label })
 
   return (
     <View style={styles.circleItem}>
-   <Svg width={SIZE} height={SIZE}>
+<Svg width={SIZE} height={SIZE}>
+  {/* Outer border ring */}
+  <Circle
+    stroke="#d1fae5" // Light green or any border color
+    fill="none"
+    cx={SIZE / 2}
+    cy={SIZE / 2}
+    r={RADIUS + 2} // Slightly bigger than background/progress
+    strokeWidth={2}
+  />
+
+  {/* Background ring */}
   <Circle
     stroke="#e5e7eb"
     fill="none"
@@ -51,6 +70,8 @@ function CircleProgress({ percent = 0, color = "#22c55e", value,target, label })
     r={RADIUS}
     strokeWidth={STROKE_WIDTH}
   />
+
+  {/* Foreground animated progress ring */}
   <AnimatedCircle
     stroke={color}
     fill="none"
@@ -81,6 +102,7 @@ function CircleProgress({ percent = 0, color = "#22c55e", value,target, label })
 
 export default function HomeScreen({ navigation }) {
   const [greeting, setGreeting] = useState("Hello");
+  const [showSidebar, setShowSidebar] = useState(false);
   const [userName, setUserName] = useState("");
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -89,58 +111,141 @@ export default function HomeScreen({ navigation }) {
   const [expandedIndex, setExpandedIndex] = useState(null);
   const [tdee, setTdee] = useState(null);
   const isToday = new Date().toDateString() === selectedDate.toDateString();
+  const [mealsLoading, setMealsLoading] = useState(true);
+  const sidebarAnim = useSharedValue(-SIDEBAR_WIDTH);
+  const overlayOpacity = useSharedValue(0);
+  const [caloriesEaten, setCaloriesEaten] = useState(0);
+  const [caloriesBurned, setCaloriesBurned] = useState(0);
+  const safeCaloriesTarget = tdee || 0;
+  const safeCaloriesEaten = caloriesEaten || 0;
+  const safeCaloriesBurned = caloriesBurned || 0;
+  const safeCaloriesLeft =
+    safeCaloriesEaten === 0 ? 0 : Math.max(0, safeCaloriesTarget - safeCaloriesEaten);
 
-  const caloriesTarget = tdee ;
-  const caloriesEaten = isToday ? 1350 : 1200;
-  const caloriesBurned = isToday ? 300 : 250;
-  const caloriesLeft = caloriesTarget - caloriesEaten;
+
+  const percentEaten = safeCaloriesTarget > 0
+    ? (safeCaloriesEaten / safeCaloriesTarget) * 100
+    : 0;
+
+  const percentLeft = safeCaloriesTarget > 0
+    ? (safeCaloriesLeft / safeCaloriesTarget) * 100
+    : 0;
+
+  const percentBurned = safeCaloriesTarget > 0
+    ? (safeCaloriesBurned / safeCaloriesTarget) * 100
+    : 0;
+
 
   const macros = isToday
     ? { carbs: 60, protein: 50, fat: 30 }
     : { carbs: 50, protein: 45, fat: 35 };
 
-  useEffect(() => {
-    const hour = new Date().getHours();
-    setGreeting(
-      hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"
-    );
+useEffect(() => {
+  const hour = new Date().getHours();
+  setGreeting(
+    hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"
+  );
 
-    const fetchUserData = async () => {
-      try {
-        const user = auth.currentUser;
-        if (!user) return;
+  const fetchUserData = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user) return;
 
-        const docRef = doc(db, "users", user.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setUserName(data.Name || "User");
-          setTdee(data.TDEE || 2000);
-        }
-      } catch (err) {
-        console.error("Error fetching user data:", err);
-      } finally {
-        setLoading(false);
+      const docRef = doc(db, "users", user.uid);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const tdeeValue = data?.calorieBreakdown?.tdee;
+        setUserName(data.Name || "User");
+        setTdee(tdeeValue ?? 2000);
+        setMealsLoading(true);
       }
-    };
+    } catch (err) {
+      console.error("Error fetching user data:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  fetchUserData();
+}, []);
+useEffect(() => {
+  if (tdee) {
     const fetchSuggestions = async () => {
       try {
+        setMealsLoading(true);
         const snapshot = await getDocs(collection(db, "meals"));
         const allMeals = snapshot.docs.map((doc) => doc.data());
         const validMeals = allMeals.filter(
-          (meal) => meal.calories && meal.calories <= caloriesLeft
+          (meal) => meal.calories && meal.calories <= (tdee - 1350)
         );
         const shuffled = validMeals.sort(() => 0.5 - Math.random());
         setSuggestions(shuffled.slice(0, 3));
       } catch (err) {
         console.error("Failed to fetch meals:", err);
+      } finally {
+        setMealsLoading(false);
       }
     };
 
-    fetchUserData();
     fetchSuggestions();
-  }, [selectedDate]);
+  }
+}, [selectedDate, tdee]);
+
+
+useEffect(() => {
+  if (showSidebar) {
+    sidebarAnim.value = withTiming(0, { duration: 300 }); // slide in
+    overlayOpacity.value = withTiming(1, { duration: 300 });
+  } else {
+    sidebarAnim.value = withTiming(-SIDEBAR_WIDTH, { duration: 300 }); // slide out left
+    overlayOpacity.value = withTiming(0, { duration: 300 });
+  }
+}, [showSidebar]);
+
+useEffect(() => {
+  const fetchDailyMealData = async () => {
+    try {
+      const user = auth.currentUser;
+      if (!user || !tdee) return;
+
+      const mealCollectionRef = collection(db, `users/${user.uid}/dailyMeals`);
+      const snapshot = await getDocs(mealCollectionRef);
+
+      let totalEaten = 0;
+      let totalBurned = 0;
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        const mealDate = data.date?.toDate();
+
+        if (
+          mealDate &&
+          mealDate.toDateString() === selectedDate.toDateString()
+        ) {
+          totalEaten += data.calories ?? 0;
+          totalBurned += data.burned ?? 0;
+        }
+      });
+
+      setCaloriesEaten(totalEaten);
+      setCaloriesBurned(totalBurned);
+    } catch (error) {
+      console.error("Failed to fetch daily meal data:", error);
+    }
+  };
+
+  fetchDailyMealData();
+}, [selectedDate, tdee]);
+
+
+const animatedSidebarStyle = useAnimatedStyle(() => ({
+  transform: [{ translateX: sidebarAnim.value }],
+}));
+
+const animatedOverlayStyle = useAnimatedStyle(() => ({
+  backgroundColor: `rgba(0,0,0,${overlayOpacity.value * 0.4})`,
+}));
 
   const goToPreviousDay = () => {
     const newDate = new Date(selectedDate);
@@ -160,34 +265,80 @@ export default function HomeScreen({ navigation }) {
     setShowPicker(Platform.OS === "ios");
     if (date) setSelectedDate(date);
   };
+const handleLogout = async () => {
+  try {
+    await auth.signOut();
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "Login" }], // Replace "Landing" with your login/landing screen name
+    });
+  } catch (err) {
+    console.error("Logout failed", err);
+  }
+};
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#22c55e" />
-      </View>
-    );
+ if (loading) {
+  return (
+    <View style={{ flex: 1, backgroundColor: "#f9fafb" }}>
+      <Loader />
+    </View>
+  );
+}
+
+const handleSync = async () => {
+  const auth = getAuth();
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    Alert.alert('Error', 'User not logged in');
+    return;
   }
 
+  const mealTypes = ['Breakfast', 'Lunch', 'Dinner'];
 
-  return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
+  try {
+    for (const type of mealTypes) {
+      const storageKey = `loggedMeals_${type}`;
+      const stored = await AsyncStorage.getItem(storageKey);
+      const meals = stored ? JSON.parse(stored) : [];
+
+      const unsynced = meals.filter(meal => !meal.synced);
+
+      for (const meal of unsynced) {
+        const userMealsRef = collection(db, 'users', currentUser.uid, 'meals');
+        await addDoc(userMealsRef, meal);
+        meal.synced = true;
+      }
+
+      // Save back updated list
+      await AsyncStorage.setItem(storageKey, JSON.stringify(meals));
+    }
+
+    Alert.alert('Success', 'All unsynced meals have been uploaded.');
+  } catch (error) {
+    console.error('Sync failed', error);
+    Alert.alert('Sync Failed', 'Unable to sync meals to cloud.');
+  }
+};
+return (
+  <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => setShowSidebar(true)}>
           <View style={styles.profileCircle}>
             <Text style={styles.profileInitial}>{userName?.charAt(0) || "U"}</Text>
           </View>
-          <View style={styles.greetingBox}>
-            <Text style={styles.greeting}>{greeting}</Text>
-            <Text style={styles.name}>{userName}</Text>
-          </View>
-          <TouchableOpacity>
-            <Ionicons name="notifications-outline" size={26} color="#14532d" />
-          </TouchableOpacity>
+        </TouchableOpacity>
+        <View style={styles.greetingBox}>
+          <Text style={styles.greeting}>{greeting}</Text>
+          <Text style={styles.name}>{userName}</Text>
         </View>
+        <TouchableOpacity>
+          <Ionicons name="notifications-outline" size={26} color="#14532d" />
+        </TouchableOpacity>
+      </View>
 
-        {/* Date Navigation */}
+      {/* Date Navigation */}
       <View style={styles.dateNav}>
         <TouchableOpacity onPress={goToPreviousDay}>
           <Ionicons name="chevron-back" size={30} color="#14532d" />
@@ -208,78 +359,118 @@ export default function HomeScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
+      {showPicker && (
+        <DateTimePicker
+          value={selectedDate}
+          mode="date"
+          display="default"
+          onChange={onDateChange}
+          maximumDate={new Date()}
+        />
+      )}
 
-        {showPicker && (
-          <DateTimePicker
-            value={selectedDate}
-            mode="date"
-            display="default"
-            onChange={onDateChange}
-            maximumDate={new Date()}
-          />
-        )}
+      {/* Circles */}
+      <View style={styles.circleRow}>
+     <CircleProgress
+  percent={percentEaten}
+  value={safeCaloriesEaten}
+  target={safeCaloriesTarget}
+  color="#22c55e"
+  label="Eaten"
+/>
 
-        {/* Circles */}
-        <View style={styles.circleRow}>
-          <CircleProgress percent={(caloriesEaten / caloriesTarget) * 100} value={caloriesEaten} target={caloriesTarget} color="#22c55e" label="Eaten" />
-          <CircleProgress percent={(caloriesLeft / caloriesTarget) * 100} value={caloriesLeft} target={caloriesTarget} color="#eab308" label="Left" />
-          <CircleProgress percent={(caloriesBurned / caloriesTarget) * 100} value={caloriesBurned} target={caloriesTarget} color="#ef4444" label="Burned" />
-        </View>
+<CircleProgress
+  percent={percentLeft}
+  value={safeCaloriesLeft}
+  target={safeCaloriesTarget}
+  color="#eab308"
+  label="Left"
+/>
 
-        {/* Macros */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Macros</Text>
-          {[{ label: "Carbs", value: macros.carbs, color: "#facc15" },
-            { label: "Protein", value: macros.protein, color: "#34d399" },
-            { label: "Fat", value: macros.fat, color: "#f87171" }
-          ].map((item) => (
-            <View style={styles.macroRow} key={item.label}>
-              <Text style={styles.macroLabel}>{item.label}</Text>
-              <View style={styles.progressBar}>
-                <View style={[styles.progressFill, {
-                  width: `${item.value}%`,
-                  backgroundColor: item.color,
-                }]} />
-              </View>
-              <Text style={styles.percent}>{item.value}%</Text>
+<CircleProgress
+  percent={percentBurned}
+  value={safeCaloriesBurned}
+  target={safeCaloriesTarget}
+  color="#ef4444"
+  label="Burned"
+/>
+
+      </View>
+
+      {/* Macros */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Macros</Text>
+        {[{ label: "Carbs", value: macros.carbs, color: "#facc15" },
+          { label: "Protein", value: macros.protein, color: "#34d399" },
+          { label: "Fat", value: macros.fat, color: "#f87171" }
+        ].map((item) => (
+          <View style={styles.macroRow} key={item.label}>
+            <Text style={styles.macroLabel}>{item.label}</Text>
+            <View style={styles.progressBar}>
+              <View style={[styles.progressFill, {
+                width: `${item.value}%`,
+                backgroundColor: item.color,
+              }]} />
             </View>
-          ))}
-        </View>
+            <Text style={styles.percent}>{item.value}%</Text>
+          </View>
+        ))}
+      </View>
 
-      
+      {/* Meal Suggestions */}
       {suggestions.length > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Meal Suggestions</Text>
+       <View style={styles.section}>
+  <Text style={styles.sectionTitle}>Meal Suggestions</Text>
+
+    {mealsLoading || tdee === null ? (
+      <View
+        style={{
+          width: CARD_WIDTH,
+          height: 140,
+          borderRadius: 16,
+          backgroundColor: "#e5e7eb",
+          alignSelf: "center",
+          marginTop: 20,
+        }}
+      />
+    ) : suggestions.length > 0 ? (
+      // Show scrollable meal suggestions
+      <View style={{ alignItems: "center", paddingVertical: 20 }}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          snapToInterval={CARD_WIDTH + 16}
+          decelerationRate="fast"
+          pagingEnabled={false}
+          contentContainerStyle={{ paddingBottom: 20 }}
+        >
           {suggestions.map((meal, index) => {
             const isExpanded = expandedIndex === index;
-
             return (
               <TouchableOpacity
                 key={index}
-                style={styles.suggestionItem}
+                style={[styles.suggestionItemHorizontal, { width: CARD_WIDTH }]}
                 activeOpacity={0.9}
                 onPress={() =>
-                  setExpandedIndex(expandedIndex === index ? null : index)
+                  setExpandedIndex(isExpanded ? null : index)
                 }
               >
                 {meal.image && (
                   <View style={styles.imageContainer}>
-                    <Image source={{ uri: meal.image }} style={styles.suggestionImage} />
+                    <Image
+                      source={{ uri: meal.image }}
+                      style={styles.suggestionImage}
+                    />
                   </View>
                 )}
                 <View style={styles.suggestionText}>
                   <View style={styles.suggestionTopRow}>
                     <Text style={styles.suggestionName}>{meal.mealName}</Text>
-                    <TouchableOpacity
-                      onPress={() => console.log("Favorite tapped:", meal.mealName)}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      <Ionicons name="star-outline" size={20} color="#facc15" />
-                    </TouchableOpacity>
+                    <Ionicons name="star-outline" size={20} color="#facc15" />
                   </View>
-
-                  <Text style={styles.suggestionCalories}>{meal.calories} kcal</Text>
-
+                  <Text style={styles.suggestionCalories}>
+                    {meal.calories ?? 0} kcal
+                  </Text>
                   {meal.description && (
                     <Text
                       style={[
@@ -291,158 +482,417 @@ export default function HomeScreen({ navigation }) {
                       {meal.description}
                     </Text>
                   )}
-
-                  <TouchableOpacity
-                    onPress={() => console.log("Add to log:", meal.mealName)}
-                    style={styles.logButton}
-                  >
+                  <TouchableOpacity style={styles.logButton}>
                     <Text style={styles.logButtonText}>Add Meal</Text>
                   </TouchableOpacity>
                 </View>
               </TouchableOpacity>
             );
           })}
-        </View>
+        </ScrollView>
+      </View>
+    ) : (
+      <Text style={{ color: "#6b7280", marginTop: 10 }}>
+        No suggestions available.
+      </Text>
+    )}
+
+</View>
+
       )}
+     
+    </ScrollView>
 
-        {/* Add Meal Button */}
-        <TouchableOpacity style={styles.addButton}>
-          <Ionicons name="add" size={22} color="#fff" />
-          <Text style={styles.addButtonText}>Log New Meal</Text>
-        </TouchableOpacity>
+    {/* Sidebar Modal */}
+{showSidebar && (
+  <Animated.View style={[styles.sidebarOverlay, animatedOverlayStyle]}>
+    {/* Backdrop for dismissing sidebar */}
+    <TouchableWithoutFeedback
+      onPress={() => {
+        sidebarAnim.value = withTiming(-260, { duration: 300 });
+        overlayOpacity.value = withTiming(0, { duration: 300 }, () => {
+          runOnJS(setShowSidebar)(false);
+        });
+      }}
+    >
+      <View style={styles.sidebarBackdrop} />
+    </TouchableWithoutFeedback>
 
-      </ScrollView>
+    {/* Sidebar Panel */}
+    <Animated.View style={[styles.sidebar, animatedSidebarStyle]}>
+     <View style={styles.sidebarHeaderWithUser}>
+  <View style={styles.sidebarUserInfo}>
+    <Image
+      source={{ uri: "https://i.pravatar.cc/150?u=" + userName }}
+      style={styles.sidebarUserImage}
+    />
+    <Text style={styles.sidebarUserName}>{userName}</Text>
+  </View>
+  <TouchableOpacity
+    onPress={() => {
+      sidebarAnim.value = withTiming(-260, { duration: 300 });
+      overlayOpacity.value = withTiming(0, { duration: 300 }, () => {
+        runOnJS(setShowSidebar)(false);
+      });
+    }}
+    style={styles.closeButton}
+    activeOpacity={0.8}
+  >
+    <Ionicons name="close" size={20} color="#6b7280" />
+  </TouchableOpacity>
     </View>
-  );
+
+
+      <TouchableOpacity style={styles.sidebarItem}>
+        <Ionicons name="person-outline" size={20} color="#14532d" />
+        <Text style={styles.sidebarItemText}>Account</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.sidebarItem}>
+        <Ionicons name="settings-outline" size={20} color="#14532d" />
+        <Text style={styles.sidebarItemText}>Settings</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.sidebarItem} onPress={handleSync}>
+        <Ionicons name="sync-outline" size={20} color="#14532d" />
+        <Text style={styles.sidebarItemText}>Sync</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.sidebarItem} onPress={handleLogout}>
+        <Ionicons name="log-out-outline" size={20} color="#14532d" />
+        <Text style={styles.sidebarItemText}>Logout</Text>
+      </TouchableOpacity>
+    </Animated.View>
+  </Animated.View>
+)}
+
+
+
+  </View>
+);
+
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f9fafb" },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   content: { padding: 24, paddingTop: 48, paddingBottom: 100 },
+
+  // Header
   header: { flexDirection: "row", alignItems: "center", marginBottom: 24 },
   profileCircle: {
-    width: 48, height: 48, borderRadius: 24,
-    backgroundColor: "#bbf7d0", justifyContent: "center", alignItems: "center", marginRight: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#bbf7d0",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 16,
   },
   profileInitial: { fontSize: 20, color: "#14532d", fontWeight: "bold" },
   greetingBox: { flex: 1 },
   greeting: { fontSize: 16, color: "#6b7280" },
   name: { fontSize: 20, fontWeight: "bold", color: "#14532d" },
-  dateNav: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    marginTop: 10, marginBottom: 30,
+
+  // Sidebar
+  sidebarOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    bottom: 0,
+    right: 0,
+    flexDirection: "row",
+    backgroundColor: "rgba(0,0,0,0.2)",
+    zIndex: 999,
   },
-  dateText: {
-    fontSize: 20, fontWeight: "bold", color: "#14532d",
-    marginHorizontal: 20,
-  },
-  circleRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 32 },
-  circleItem: { alignItems: "center", flex: 1, backgroundColor: "transparent" },
-  circleValueContainer: {
+  sidebarBackdrop: { flex: 1 },
+sidebar: {
   position: "absolute",
-  top: SIZE / 2 - 18,
-  left: 0,
-  right: 0,
-  alignItems: "center",
-},
-circleValue: {
-  fontSize: 14,
-  fontWeight: "bold",
-  color: "#111827",
-},
- unit: {
-  fontSize: 15,
-  color: "#6b7280",
-  marginTop: 2,
+  left: 0, // stay on left
+  top: 0,
+  bottom: 0,
+  width: SIDEBAR_WIDTH,
+  backgroundColor: "#ffffff",
+  padding: 20,
+  paddingTop: 40,
+  shadowColor: "#000",
+  shadowOffset: { width: 3, height: 0 },
+  shadowOpacity: 0.1,
+  shadowRadius: 10,
+  elevation: 10,
+  zIndex: 1000, // ensure it's on top
 },
 
-  circleLabel: { marginTop: 10, fontSize: 14, color: "#374151" },
-  section: { marginBottom: 32 },
-  sectionTitle: { fontSize: 18, fontWeight: "bold", color: "#14532d", marginBottom: 16 },
-  macroRow: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
-  macroLabel: { width: 70, fontSize: 14, color: "#4b5563" },
-  progressBar: {
-    flex: 1, height: 10, backgroundColor: "#e5e7eb",
-    borderRadius: 5, overflow: "hidden", marginHorizontal: 10,
-  },
-  progressFill: { height: "100%", borderRadius: 5 },
-  percent: { width: 40, textAlign: "right", fontSize: 14, color: "#374151" },
-  addButton: {
-    flexDirection: "row", backgroundColor: "#22c55e",
-    paddingVertical: 14, borderRadius: 12, justifyContent: "center", alignItems: "center",
-    shadowColor: "#22c55e", shadowOpacity: 0.3, shadowRadius: 10, elevation: 4,
-  },
-  addButtonText: { color: "#fff", fontWeight: "600", fontSize: 16, marginLeft: 8 }, suggestionItem: {
-    backgroundColor: "#ecfdf5",
-    padding: 12,
-    borderRadius: 10,
-    marginBottom: 10,
-  },
-suggestionItem: {
-  flexDirection: "row",
-  alignItems: "center",
-  backgroundColor: "#ffffff",
-  padding: 14,
-  borderRadius: 16,
-  marginBottom: 14,
-  shadowColor: "#000",
-  shadowOpacity: 0.05,
-  shadowOffset: { width: 0, height: 3 },
-  shadowRadius: 6,
-  elevation: 2,
-},
-imageContainer: {
-  width: 64,
-  height: 64,
-  borderRadius: 12,
-  overflow: "hidden",
-  marginRight: 14,
-  backgroundColor: "#f3f4f6",
-},
-suggestionImage: {
-  width: "100%",
-  height: "100%",
-  resizeMode: "cover",
-},
-suggestionText: {
-  flex: 1,
-  justifyContent: "center",
-},
-suggestionName: {
-  fontSize: 16,
-  fontWeight: "600",
-  color: "#111827",
-  marginBottom: 4,
-},
-suggestionCalories: {
-  fontSize: 14,
-  color: "#16a34a",
-  fontWeight: "500",
-},
-suggestionDescription: {
-  fontSize: 12,
-  color: "#6b7280",
-  marginTop: 4,
-},
-suggestionTopRow: {
+sidebarHeader: {
   flexDirection: "row",
   justifyContent: "space-between",
   alignItems: "center",
-  marginBottom: 4,
+  marginBottom: 24,
+  borderBottomWidth: 1,
+  borderBottomColor: "#d1fae5",
+  paddingBottom: 12,
 },
-logButton: {
-  marginTop: 10,
-  backgroundColor: "#22c55e",
-  paddingVertical: 6,
-  paddingHorizontal: 12,
-  borderRadius: 8,
-  alignSelf: "flex-start",
+sidebarTitle: {
+  fontSize: 20,
+  fontWeight: "700",
+  color: "#14532d",
 },
-logButtonText: {
-  color: "#fff",
-  fontSize: 13,
+sidebarHeaderWithUser: {
+  flexDirection: "row",
+  justifyContent: "space-between",
+  alignItems: "center",
+  marginBottom: 24,
+  borderBottomWidth: 1,
+  borderBottomColor: "#d1fae5",
+  paddingBottom: 12,
+},
+sidebarUserInfo: {
+  flexDirection: "row",
+  alignItems: "center",
+},
+sidebarUserImage: {
+  width: 40,
+  height: 40,
+  borderRadius: 20,
+  backgroundColor: "#bbf7d0",
+  marginRight: 12,
+},
+sidebarUserName: {
+  fontSize: 18,
+  fontWeight: "bold",
   fontWeight: "600",
+  color: "#14532d",
 },
 
+closeButton: {
+  backgroundColor: "#e5e7eb",       // Light green background
+  borderRadius: 20,
+  padding: 8,
+  shadowColor: "#000",
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.1,
+  shadowRadius: 2,
+  elevation: 2,
+  color:"#ffffff"
+},
+
+sidebarItem: {
+  flexDirection: "row",
+  alignItems: "center",
+  paddingVertical: 14,
+  paddingHorizontal: 10,
+  borderRadius: 12,
+  marginBottom: 10,
+  backgroundColor: "#ffffff",
+  shadowColor: "#000",
+  shadowOpacity: 0.03,
+  shadowOffset: { width: 0, height: 1 },
+  shadowRadius: 3,
+  elevation: 1,
+},
+sidebarItemText: {
+  marginLeft: 12,
+  fontSize: 16,
+  fontWeight: "500",
+  color: "#14532d",
+},
+
+  // Date Navigation
+  dateNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 10,
+    marginBottom: 30,
+  },
+  dateText: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#14532d",
+    marginHorizontal: 20,
+  },
+
+  // Circle Progress
+  circleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 32,
+  },
+  circleItem: {
+    alignItems: "center",
+    flex: 1,
+    backgroundColor: "transparent",
+  },
+  circleValueContainer: {
+    position: "absolute",
+    top: SIZE / 2 - 18,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+  },
+  circleValue: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#111827",
+  },
+  unit: {
+    fontSize: 15,
+    color: "#6b7280",
+    marginTop: 2,
+  },
+  circleLabel: {
+    marginTop: 10,
+    fontSize: 14,
+    color: "#374151",
+  },
+
+  // Section Titles
+  section: { marginBottom: 32 },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: "#14532d",
+    marginBottom: 5,
+  },
+
+  // Macros
+  macroRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  macroLabel: {
+    width: 70,
+    fontSize: 14,
+    color: "#4b5563",
+  },
+  progressBar: {
+    flex: 1,
+    height: 10,
+    backgroundColor: "#e5e7eb",
+    borderRadius: 5,
+    overflow: "hidden",
+    marginHorizontal: 10,
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 5,
+  },
+  percent: {
+    width: 40,
+    textAlign: "right",
+    fontSize: 14,
+    color: "#374151",
+  },
+
+  // Add Button
+  addButton: {
+    flexDirection: "row",
+    backgroundColor: "#22c55e",
+    paddingVertical: 14,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#22c55e",
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  addButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 16,
+    marginLeft: 8,
+  },
+
+  // Suggestions
+  suggestionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    padding: 14,
+    borderRadius: 16,
+    marginBottom: 14,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  suggestionItemHorizontal: {
+    width: screenWidth - 64,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    padding: 14,
+    borderRadius: 16,
+    marginRight: 16,
+    flexShrink: 0,
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  imageContainer: {
+    width: 64,
+    height: 64,
+    borderRadius: 12,
+    overflow: "hidden",
+    marginRight: 14,
+    backgroundColor: "#f3f4f6",
+  },
+  suggestionImage: {
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  suggestionText: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  suggestionTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  suggestionName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#111827",
+    marginBottom: 4,
+  },
+  suggestionCalories: {
+    fontSize: 14,
+    color: "#16a34a",
+    fontWeight: "500",
+  },
+  suggestionDescription: {
+    fontSize: 12,
+    color: "#6b7280",
+    marginTop: 4,
+  },
+  logButton: {
+    marginTop: 10,
+    backgroundColor: "#22c55e",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignSelf: "flex-start",
+  },
+  logButtonText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+
+  // Carousel
+  carouselContent: {
+    paddingHorizontal: 24,
+  },
+  suggestionSection: {
+    width: "100%",
+    marginBottom: 32,
+  },
 });

@@ -17,21 +17,32 @@ import LoginScreen from './components/screens/GetStarted/Login';
 import HomeScreen from './components/screens/Home/HomeScreen';
 import ProfileScreen from './components/screens/Home/ProfileScreen';
 import MainTabs from './components/navigation/MainTabs';
-
+import LogFoodModal from './components/screens/Home/Log/LogFoodModal';
+import MealsScreen from './components/screens/Home/MealsScreen';
+import * as SplashScreenNative from 'expo-splash-screen';
 import { auth } from './config/firebase-config';
 import { onAuthStateChanged } from 'firebase/auth';
 
+
+
 const Stack = createNativeStackNavigator();
+
+// Keep splash visible while we fetch resources
+SplashScreenNative.preventAutoHideAsync().catch(() => {
+  /* ignore if already prevented */
+});
 
 export default function App() {
   const [splashVisible, setSplashVisible] = useState(true);
   const [initialRoute, setInitialRoute] = useState(null);
 
   useEffect(() => {
+    let unsubscribe;
+
     const checkAuthState = async () => {
       const hasLaunched = await AsyncStorage.getItem('hasLaunched');
 
-      const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      unsubscribe = onAuthStateChanged(auth, async (user) => {
         if (!hasLaunched) {
           await AsyncStorage.setItem('hasLaunched', 'true');
           setInitialRoute('Landing');
@@ -43,12 +54,20 @@ export default function App() {
 
         setSplashVisible(false);
       });
-
-      return () => unsubscribe();
     };
 
     checkAuthState();
+
+    return () => {
+      if (unsubscribe) unsubscribe(); // cleanup
+    };
   }, []);
+
+  useEffect(() => {
+    if (!splashVisible && initialRoute) {
+      SplashScreenNative.hideAsync().catch(() => {});
+    }
+  }, [splashVisible, initialRoute]);
 
   if (splashVisible || !initialRoute) return <SplashScreen />;
 
@@ -63,6 +82,10 @@ export default function App() {
           <Stack.Screen name="SignUpWithEmail" component={SignUpWithEmail} />
           <Stack.Screen name="MainTabs" component={MainTabs} />
           <Stack.Screen name="Profile" component={ProfileScreen} />
+          <Stack.Screen name="Meals" component={MealsScreen} />
+          <Stack.Group screenOptions={{ presentation: 'modal' }}>
+            <Stack.Screen name="LogFoodModal" component={LogFoodModal} options={{ title: "Log New Food" }} />
+          </Stack.Group>
         </Stack.Navigator>
       </NavigationContainer>
     </GluestackUIProvider>

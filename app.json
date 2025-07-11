@@ -16,6 +16,18 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+    "plugins": [
+    [
+      "expo-splash-screen",
+      {
+        "android": {
+          "userInterfaceStyle": "light",
+          "resizeMode": "cover",
+          "statusBarTranslucent": true
+        }
+      }
+    ]
+  ],
     "ios": {
       "supportsTablet": true
     },
