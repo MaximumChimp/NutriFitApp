@@ -18,7 +18,8 @@ import Animated, {
   useAnimatedProps,
   withTiming, 
   useAnimatedStyle,
-  runOnJS 
+  runOnJS,
+  FadeIn 
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import { auth, db } from "@/config/firebase-config";
@@ -29,6 +30,8 @@ const CARD_WIDTH = screenWidth - 48;
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { getAuth } from 'firebase/auth';
 import { Alert } from 'react-native';
+import moment from 'moment';
+
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 const SIZE = 100;
@@ -116,29 +119,34 @@ export default function HomeScreen({ navigation }) {
   const overlayOpacity = useSharedValue(0);
   const [caloriesEaten, setCaloriesEaten] = useState(0);
   const [caloriesBurned, setCaloriesBurned] = useState(0);
-  const safeCaloriesTarget = tdee || 0;
-  const safeCaloriesEaten = caloriesEaten || 0;
-  const safeCaloriesBurned = caloriesBurned || 0;
-  const safeCaloriesLeft =
-    safeCaloriesEaten === 0 ? 0 : Math.max(0, safeCaloriesTarget - safeCaloriesEaten);
+  const [macrosPercent, setMacrosPercent] = useState({ carbs: 0, protein: 0, fat: 0 });
+  const [caloriesLeft, setCaloriesLeft] = useState(0);
+
+const safeCaloriesTarget = tdee || 0;
+const safeCaloriesEaten = caloriesEaten || 0;
+const safeCaloriesBurned = caloriesBurned || 0;
+
+// ✅ Updated this line:
+const safeCaloriesLeft = caloriesLeft || 0;
 
 
-  const percentEaten = safeCaloriesTarget > 0
-    ? (safeCaloriesEaten / safeCaloriesTarget) * 100
-    : 0;
+const percentEaten = safeCaloriesTarget > 0
+  ? (safeCaloriesEaten / safeCaloriesTarget) * 100
+  : 0;
 
-  const percentLeft = safeCaloriesTarget > 0
-    ? (safeCaloriesLeft / safeCaloriesTarget) * 100
-    : 0;
+const percentLeft = safeCaloriesTarget > 0
+  ? (safeCaloriesLeft / safeCaloriesTarget) * 100
+  : 0;
 
-  const percentBurned = safeCaloriesTarget > 0
-    ? (safeCaloriesBurned / safeCaloriesTarget) * 100
-    : 0;
+const percentBurned = safeCaloriesTarget > 0
+  ? (safeCaloriesBurned / safeCaloriesTarget) * 100
+  : 0;
 
 
-  const macros = isToday
-    ? { carbs: 60, protein: 50, fat: 30 }
-    : { carbs: 50, protein: 45, fat: 35 };
+const macros = macrosPercent;
+
+
+
 
 useEffect(() => {
   const hour = new Date().getHours();
@@ -204,40 +212,10 @@ useEffect(() => {
 }, [showSidebar]);
 
 useEffect(() => {
-  const fetchDailyMealData = async () => {
-    try {
-      const user = auth.currentUser;
-      if (!user || !tdee) return;
-
-      const mealCollectionRef = collection(db, `users/${user.uid}/dailyMeals`);
-      const snapshot = await getDocs(mealCollectionRef);
-
-      let totalEaten = 0;
-      let totalBurned = 0;
-
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        const mealDate = data.date?.toDate();
-
-        if (
-          mealDate &&
-          mealDate.toDateString() === selectedDate.toDateString()
-        ) {
-          totalEaten += data.calories ?? 0;
-          totalBurned += data.burned ?? 0;
-        }
-      });
-
-      setCaloriesEaten(totalEaten);
-      setCaloriesBurned(totalBurned);
-    } catch (error) {
-      console.error("Failed to fetch daily meal data:", error);
-    }
-  };
-
-  fetchDailyMealData();
+  if (tdee) {
+    loadLocalMealsForDate(selectedDate);
+  }
 }, [selectedDate, tdee]);
-
 
 const animatedSidebarStyle = useAnimatedStyle(() => ({
   transform: [{ translateX: sidebarAnim.value }],
@@ -285,6 +263,72 @@ const handleLogout = async () => {
   );
 }
 
+const loadLocalMealsForDate = async (date) => {
+  let totalCalories = 0;
+  let totalCarbs = 0;
+  let totalProtein = 0;
+  let totalFat = 0;
+
+  for (const tab of ['Breakfast', 'Lunch', 'Dinner']) {
+    const key = `loggedMeals_${tab}`;
+    const stored = await AsyncStorage.getItem(key);
+    const meals = stored ? JSON.parse(stored) : [];
+
+    const filtered = meals.filter((m) =>
+      moment(m.createdAt).isSame(moment(date), 'day')
+    );
+
+    for (const meal of filtered) {
+      totalCalories += meal.calories || 0;
+
+      // ✅ Safely read from nested macros
+      if (meal.macros) {
+        totalCarbs += meal.macros.carbs || 0;
+        totalProtein += meal.macros.protein || 0;
+        totalFat += meal.macros.fat || 0;
+      }
+    }
+  }
+
+  // ✅ Now update state directly
+  const tefValue = totalCalories * 0.1;
+
+  setCaloriesEaten(totalCalories);
+  setCaloriesLeft((tdee || 0) - totalCalories);
+  setCaloriesBurned(Math.round(tefValue));
+  setMacrosPercent({
+    carbs: Math.round(totalCarbs),
+    protein: Math.round(totalProtein),
+    fat: Math.round(totalFat),
+  });
+};
+
+
+function CircleSkeleton() {
+  return (
+    <View style={styles.circleItem}>
+      <View style={styles.circleSkeleton} />
+      <View style={styles.circleValueContainer}>
+        <Text style={styles.skeletonText}>--/--</Text>
+        <Text style={styles.unit}>kcal</Text>
+      </View>
+      <Text style={styles.circleLabel}>Loading</Text>
+    </View>
+  );
+}
+
+function MacroSkeleton() {
+  return (
+    <View style={styles.macroSkeletonRow}>
+      <View style={styles.macroSkeletonLabel} />
+      <View style={styles.macroSkeletonBar} />
+      <View style={styles.macroSkeletonValue} />
+    </View>
+  );
+}
+
+
+
 const handleSync = async () => {
   const auth = getAuth();
   const currentUser = auth.currentUser;
@@ -293,32 +337,52 @@ const handleSync = async () => {
     return;
   }
 
-  const mealTypes = ['Breakfast', 'Lunch', 'Dinner'];
-
   try {
-    for (const type of mealTypes) {
-      const storageKey = `loggedMeals_${type}`;
-      const stored = await AsyncStorage.getItem(storageKey);
-      const meals = stored ? JSON.parse(stored) : [];
+    const snapshot = await getDocs(collection(db, 'users', currentUser.uid, 'meals'));
+    const mealsByType = { Breakfast: [], Lunch: [], Dinner: [] };
+    const mealIds = [];
 
-      const unsynced = meals.filter(meal => !meal.synced);
+    for (const docSnap of snapshot.docs) {
+      const meal = docSnap.data();
+      const mealId = docSnap.id;
+      meal.id = mealId;
 
-      for (const meal of unsynced) {
-        const userMealsRef = collection(db, 'users', currentUser.uid, 'meals');
-        await addDoc(userMealsRef, meal);
-        meal.synced = true;
+      // ✅ Set a fallback createdAt date if missing
+      if (!meal.createdAt) {
+        meal.createdAt = new Date().toISOString();
       }
 
-      // Save back updated list
-      await AsyncStorage.setItem(storageKey, JSON.stringify(meals));
+      // ✅ Use existing image URL from Firestore (ImgBB)
+      if (!meal.image || !meal.image.startsWith('http')) {
+        console.warn(`Meal ${meal.name || mealId} is missing a valid image URL.`);
+      }
+
+      const type = meal.mealType || 'Breakfast';
+      if (!mealsByType[type]) mealsByType[type] = [];
+      mealsByType[type].push(meal);
+      mealIds.push(mealId);
     }
 
-    Alert.alert('Success', 'All unsynced meals have been uploaded.');
+
+    // Save meals to AsyncStorage
+    for (const [type, meals] of Object.entries(mealsByType)) {
+      await AsyncStorage.setItem(`loggedMeals_${type}`, JSON.stringify(meals));
+    }
+
+    // Save synced meal IDs
+    await AsyncStorage.setItem('syncedMealIds', JSON.stringify(mealIds));
+
+    // ✅ Refresh HomeScreen data using selectedDate
+    await loadLocalMealsForDate(selectedDate);
+
+    Alert.alert('Success', 'Meals and images loaded from Firebase.');
   } catch (error) {
-    console.error('Sync failed', error);
-    Alert.alert('Sync Failed', 'Unable to sync meals to cloud.');
+    console.error('handleSync Error:', error);
+    Alert.alert('Sync Failed', 'Unable to load meals from Firebase.');
   }
 };
+
+
 return (
   <View style={styles.container}>
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -339,25 +403,30 @@ return (
       </View>
 
       {/* Date Navigation */}
-      <View style={styles.dateNav}>
-        <TouchableOpacity onPress={goToPreviousDay}>
-          <Ionicons name="chevron-back" size={30} color="#14532d" />
-        </TouchableOpacity>
+<View style={styles.dateNav}>
+  <TouchableOpacity style={styles.dateArrow} onPress={goToPreviousDay}>
+    <Ionicons name="chevron-back" size={30} color="#14532d" />
+  </TouchableOpacity>
 
-        <TouchableOpacity onPress={() => setShowPicker(true)}>
-          <Text style={styles.dateText}>
-            {isToday ? "Today" : selectedDate.toDateString()}
-          </Text>
-        </TouchableOpacity>
+  <TouchableOpacity style={styles.dateTextWrapper} onPress={() => setShowPicker(true)}>
+    <Text style={styles.dateText}>
+      {isToday ? "Today" : selectedDate.toDateString()}
+    </Text>
+  </TouchableOpacity>
 
-        <TouchableOpacity onPress={goToNextDay} disabled={isToday}>
-          <Ionicons
-            name="chevron-forward"
-            size={30}
-            color={isToday ? "#d1d5db" : "#14532d"}
-          />
-        </TouchableOpacity>
-      </View>
+  <TouchableOpacity
+    style={styles.dateArrow}
+    onPress={goToNextDay}
+    disabled={isToday}
+  >
+    <Ionicons
+      name="chevron-forward"
+      size={30}
+      color={isToday ? "#d1d5db" : "#14532d"}
+    />
+  </TouchableOpacity>
+</View>
+
 
       {showPicker && (
         <DateTimePicker
@@ -370,52 +439,76 @@ return (
       )}
 
       {/* Circles */}
-      <View style={styles.circleRow}>
-     <CircleProgress
-  percent={percentEaten}
-  value={safeCaloriesEaten}
-  target={safeCaloriesTarget}
-  color="#22c55e"
-  label="Eaten"
-/>
+<Animated.View entering={FadeIn.duration(400)} style={styles.circleRow}>
+  {mealsLoading ? (
+    <>
+      <CircleSkeleton />
+      <CircleSkeleton />
+      <CircleSkeleton />
+    </>
+  ) : (
+    <>
+      <CircleProgress
+        percent={percentEaten}
+        value={safeCaloriesEaten}
+        target={safeCaloriesTarget}
+        color="#22c55e"
+        label="Eaten"
+      />
+      <CircleProgress
+        percent={percentLeft}
+        value={safeCaloriesLeft}
+        target={safeCaloriesTarget}
+        color="#eab308"
+        label="Left"
+      />
+      <CircleProgress
+        percent={percentBurned}
+        value={safeCaloriesBurned}
+        target={safeCaloriesTarget}
+        color="#ef4444"
+        label="Burned"
+      />
+    </>
+  )}
+</Animated.View>
 
-<CircleProgress
-  percent={percentLeft}
-  value={safeCaloriesLeft}
-  target={safeCaloriesTarget}
-  color="#eab308"
-  label="Left"
-/>
 
-<CircleProgress
-  percent={percentBurned}
-  value={safeCaloriesBurned}
-  target={safeCaloriesTarget}
-  color="#ef4444"
-  label="Burned"
-/>
-
-      </View>
 
       {/* Macros */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Macros</Text>
-        {[{ label: "Carbs", value: macros.carbs, color: "#facc15" },
-          { label: "Protein", value: macros.protein, color: "#34d399" },
-          { label: "Fat", value: macros.fat, color: "#f87171" }
-        ].map((item) => (
-          <View style={styles.macroRow} key={item.label}>
-            <Text style={styles.macroLabel}>{item.label}</Text>
-            <View style={styles.progressBar}>
-              <View style={[styles.progressFill, {
-                width: `${item.value}%`,
+<View style={styles.section}>
+  <Text style={styles.sectionTitle}>Macros</Text>
+
+  {mealsLoading ? (
+    <>
+      <MacroSkeleton />
+      <MacroSkeleton />
+      <MacroSkeleton />
+    </>
+  ) : (
+    [
+      { label: "Carbs", value: macros.carbs, color: "#facc15" },
+      { label: "Protein", value: macros.protein, color: "#34d399" },
+      { label: "Fat", value: macros.fat, color: "#f87171" }
+    ].map((item) => (
+      <View style={styles.macroRow} key={item.label}>
+        <Text style={styles.macroLabel}>{item.label}</Text>
+        <View style={styles.progressBar}>
+          <View
+            style={[
+              styles.progressFill,
+              {
+                width: `${Math.min(item.value, 100)}%`,
                 backgroundColor: item.color,
-              }]} />
-            </View>
-            <Text style={styles.percent}>{item.value}%</Text>
-          </View>
-        ))}
+              },
+            ]}
+          />
+        </View>
+        <Text style={styles.percent}>{item.value}g</Text>
       </View>
+    ))
+  )}
+</View>
 
       {/* Meal Suggestions */}
       {suggestions.length > 0 && (
@@ -698,20 +791,27 @@ sidebarItemText: {
 },
 
   // Date Navigation
-  dateNav: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 10,
-    marginBottom: 30,
-  },
-  dateText: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#14532d",
-    marginHorizontal: 20,
-  },
-
+dateNav: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginTop: 10,
+  marginBottom: 30,
+  width: "100%",
+},
+dateArrow: {
+  flex: 1,
+  alignItems: "center",
+},
+dateTextWrapper: {
+  flex: 2,
+  alignItems: "center",
+},
+dateText: {
+  fontSize: 20,
+  fontWeight: "bold",
+  color: "#14532d",
+},  
   // Circle Progress
   circleRow: {
     flexDirection: "row",
@@ -895,4 +995,46 @@ sidebarItemText: {
     width: "100%",
     marginBottom: 32,
   },
+  circleSkeleton: {
+  width: SIZE,
+  height: SIZE,
+  borderRadius: SIZE / 2,
+  backgroundColor: "#e5e7eb",
+  justifyContent: "center",
+  alignItems: "center",
+},
+skeletonText: {
+  fontSize: 14,
+  fontWeight: "bold",
+  color: "#9ca3af",
+},
+macroSkeletonRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  marginBottom: 12,
+},
+
+macroSkeletonLabel: {
+  width: 70,
+  height: 14,
+  borderRadius: 4,
+  backgroundColor: "#e5e7eb",
+  marginRight: 10,
+},
+
+macroSkeletonBar: {
+  flex: 1,
+  height: 10,
+  borderRadius: 5,
+  backgroundColor: "#e5e7eb",
+  marginRight: 10,
+},
+
+macroSkeletonValue: {
+  width: 40,
+  height: 14,
+  borderRadius: 4,
+  backgroundColor: "#e5e7eb",
+},
+
 });

@@ -7,29 +7,43 @@ import {
   TouchableOpacity,
   Image,
   Alert,
+  Platform,
+  ActivityIndicator 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { auth, db } from '../../../config/firebase-config';
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  deleteDoc,
-} from 'firebase/firestore';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { db, auth } from '../../../config/firebase-config';
+import moment from 'moment';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 export default function MealsScreen() {
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState('Breakfast');
   const [userMeals, setUserMeals] = useState([]);
-  const [synced, setSynced] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [viewMode, setViewMode] = useState('weekly');
+  const [isCompactView, setIsCompactView] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const defaultMeals = {
-    Breakfast: [],
-    Lunch: [],
-    Dinner: [],
+  const tabs = ['Breakfast', 'Lunch', 'Dinner'];
+
+  const getWeekRange = (date) => {
+    const start = moment(date).startOf('week');
+    const end = moment(date).endOf('week');
+    return [start, end];
+  };
+
+  const groupMealsByDay = (meals) => {
+    const grouped = {};
+    meals.forEach((meal) => {
+      const day = moment(meal.createdAt).format('dddd, MMM D');
+      if (!grouped[day]) grouped[day] = [];
+      grouped[day].push(meal);
+    });
+    return grouped;
   };
 
   const loadLocalMeals = async () => {
@@ -38,89 +52,187 @@ export default function MealsScreen() {
       const stored = await AsyncStorage.getItem(key);
       const meals = stored ? JSON.parse(stored) : [];
 
-      const filtered = meals.filter(m => m.image && m.name && m.id);
+      let filtered = [];
+
+      if (viewMode === 'weekly') {
+        const [start, end] = getWeekRange(selectedDate);
+        filtered = meals.filter((m) => {
+          const createdAt = moment(m.createdAt);
+          return createdAt.isBetween(start, end, 'day', '[]');
+        });
+      } else {
+        filtered = meals.filter((m) =>
+          moment(m.createdAt).isSame(moment(selectedDate), 'day')
+        );
+      }
+
       const uniqueMeals = Object.values(
         filtered.reduce((acc, meal) => {
           acc[meal.id] = meal;
           return acc;
         }, {})
       );
+
       setUserMeals(uniqueMeals);
     } catch (error) {
       console.error('Failed to load user meals:', error);
     }
   };
 
-  const syncWithFirebase = async () => {
-    try {
-      const user = auth.currentUser;
-      if (!user) return;
-
-      const userMealsRef = collection(db, 'users', user.uid, 'meals');
-      const snapshot = await getDocs(query(userMealsRef, where('mealType', '==', activeTab)));
-
-      const syncedMeals = snapshot.docs.map((doc) => doc.data());
-
-      const uniqueSynced = Object.values(
-        syncedMeals.reduce((acc, meal) => {
-          acc[meal.id] = meal;
-          return acc;
-        }, {})
-      );
-
-      setUserMeals(uniqueSynced);
-      setSynced(true); // ✅ disable button
-    } catch (err) {
-      console.error('Sync error:', err);
-      Alert.alert('Error', 'Failed to sync with database.');
-    }
-  };
-
   useFocusEffect(
     React.useCallback(() => {
       loadLocalMeals();
-      setSynced(false); // ✅ re-enable sync when changing tabs
-    }, [activeTab])
+    }, [activeTab, selectedDate, viewMode])
   );
 
   const handleEditMeal = (meal) => {
     navigation.navigate('LogFoodModal', { mealToEdit: meal, mealType: activeTab });
   };
 
+  const uploadImageToImgBB = async (imageUri) => {
+  try {
+    const apiKey = '5d3311f90ffc71914620a8d5c008eb9a'; // replace with your actual ImgBB API key
+
+    // Read the image as base64
+    const response = await fetch(imageUri);
+    const blob = await response.blob();
+
+    const reader = new FileReader();
+
+    return new Promise((resolve, reject) => {
+      reader.onloadend = async () => {
+        const base64 = reader.result.split(',')[1];
+
+        const formData = new FormData();
+        formData.append('image', base64);
+
+        const res = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          resolve(data.data.url);
+        } else {
+          reject(new Error('Upload failed'));
+        }
+      };
+
+      reader.onerror = () => {
+        reject(new Error('File reading failed'));
+      };
+
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.error('uploadImageToImgBB error:', error);
+    throw error;
+  }
+};
+
+
+  
+const handleSaveToFirebase = async () => {
+  try {
+    setIsSaving(true); // Start loading
+
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      Alert.alert('Not logged in', 'Please sign in to sync your meals.');
+      return;
+    }
+
+    const userId = currentUser.uid;
+    const localMeals = [];
+
+    for (const tab of tabs) {
+      const stored = await AsyncStorage.getItem(`loggedMeals_${tab}`);
+      if (stored) {
+        const meals = JSON.parse(stored);
+        meals.forEach((meal) => localMeals.push(meal));
+      }
+    }
+
+    const prevSyncedStr = await AsyncStorage.getItem('syncedMealIds');
+    const prevSyncedIds = prevSyncedStr ? JSON.parse(prevSyncedStr) : [];
+    const localIds = localMeals.map((m) => m.id);
+    const deletedIds = prevSyncedIds.filter((id) => !localIds.includes(id));
+
+    for (const id of deletedIds) {
+      await deleteDoc(doc(db, 'users', userId, 'meals', id));
+    }
+
+    for (const meal of localMeals) {
+      const updatedMeal = { ...meal };
+
+      if (meal.image && !meal.image.startsWith('http')) {
+        try {
+          updatedMeal.image = await uploadImageToImgBB(meal.image);
+        } catch (imgErr) {
+          console.error('Image upload failed:', imgErr);
+        }
+      }
+
+      await setDoc(doc(db, 'users', userId, 'meals', meal.id), {
+        ...updatedMeal,
+        mealType: meal.mealType || activeTab,
+        syncedAt: Date.now(),
+      });
+    }
+
+    await AsyncStorage.setItem('syncedMealIds', JSON.stringify(localIds));
+    Alert.alert('Success', 'Meals Saved!');
+  } catch (err) {
+    console.error('Sync Error:', err);
+    Alert.alert('Error', 'Failed to save meals.Check internet connection!');
+  } finally {
+    setIsSaving(false); // End loading
+  }
+};
+
+
+
   const handleDeleteMeal = async (meal) => {
     try {
       const key = `loggedMeals_${activeTab}`;
-      const stored = await AsyncStorage.getItem(key);
+      const stored = await AsyncStorage.getItem(key);          // Get meals for current tab
       const meals = stored ? JSON.parse(stored) : [];
-      const filtered = meals.filter((m) => m.id !== meal.id);
-      await AsyncStorage.setItem(key, JSON.stringify(filtered));
+      const filtered = meals.filter((m) => m.id !== meal.id);  // Remove the meal with matching id
 
-      if (auth.currentUser) {
-        const userMealsRef = collection(db, 'users', auth.currentUser.uid, 'meals');
-        const q = query(userMealsRef, where('id', '==', meal.id));
-        const snapshot = await getDocs(q);
-        snapshot.forEach(async (docSnap) => {
-          await deleteDoc(docSnap.ref);
-        });
-      }
+      await AsyncStorage.setItem(key, JSON.stringify(filtered)); // Save updated list to AsyncStorage
 
-      Alert.alert('Deleted', `${meal.name} has been removed.`);
-      synced ? syncWithFirebase() : loadLocalMeals(); // auto refresh view
+      Alert.alert('Deleted', `${meal.name} has been removed.`); // Show success alert
+      loadLocalMeals(); // Reload meals into state
     } catch (err) {
       console.error('Delete Error:', err);
       Alert.alert('Error', 'Failed to delete meal.');
     }
   };
 
-  const combinedMeals = [...defaultMeals[activeTab], ...userMeals];
-  const totalKcal = combinedMeals.reduce((sum, m) => sum + (m.calories || 0), 0);
-  const tabs = Object.keys(defaultMeals);
+
+  const groupedMeals = groupMealsByDay(userMeals);
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>🍽 {activeTab}</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.header}>Meals Overview</Text>
+        <TouchableOpacity style={styles.saveButton} onPress={handleSaveToFirebase} disabled={isSaving}>
+        {isSaving ? (
+          <ActivityIndicator size="small" color="#22c55e" />
+        ) : (
+          <>
+            <Ionicons name="cloud-upload-outline" size={18} color="#22c55e" style={{ marginRight: 6 }} />
+            <Text style={styles.saveText}>Save</Text>
+          </>
+        )}
+      </TouchableOpacity>
 
-      {/* Tabs */}
+      </View>
+
+
+
       <View style={styles.tabContainer}>
         {tabs.map((tab) => (
           <TouchableOpacity
@@ -135,54 +247,103 @@ export default function MealsScreen() {
         ))}
       </View>
 
-      {/* Meals */}
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-        {combinedMeals.map((meal) => (
-          <View key={meal.id} style={styles.card}>
-            <Image source={{ uri: meal.image }} style={styles.image} />
-            <View style={styles.cardContent}>
-              <Text style={styles.mealName}>{meal.name}</Text>
-              <Text style={styles.description}>{meal.recipe || meal.description}</Text>
-              <Text style={styles.kcal}>{meal.calories} kcal</Text>
-              <View style={styles.macros}>
-                <Text style={styles.macroText}>Carbs: {meal.macros?.carbs || 0}g</Text>
-                <Text style={styles.macroText}>Protein: {meal.macros?.protein || 0}g</Text>
-                <Text style={styles.macroText}>Fat: {meal.macros?.fat || 0}g</Text>
-              </View>
+      <View style={styles.calendarRow}>
+        <TouchableOpacity style={styles.calendarButton} onPress={() => setShowDatePicker(true)}>
+          <Ionicons name="calendar-outline" size={20} color="#14532d" />
+          <Text style={styles.calendarText}>
+            {viewMode === 'weekly'
+              ? `Week of ${moment(selectedDate).startOf('week').format('MMM D')}`
+              : moment(selectedDate).format('MMMM D, YYYY')}
+          </Text>
+        </TouchableOpacity>
 
-              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
-                <TouchableOpacity onPress={() => handleEditMeal(meal)}>
-                  <Ionicons name="create-outline" size={20} color="#22c55e" style={{ marginRight: 16 }} />
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDeleteMeal(meal)}>
-                  <Ionicons name="trash-outline" size={20} color="#ef4444" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        ))}
-        <Text style={styles.totalCalories}>Total: {totalKcal} kcal</Text>
-      </ScrollView>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity
+            onPress={() => setViewMode(viewMode === 'weekly' ? 'daily' : 'weekly')}
+            style={styles.viewToggleButton}
+          >
+            <Ionicons name="repeat-outline" size={16} color="#14532d" />
+            <Text style={styles.viewToggleText}>
+              {viewMode === 'weekly' ? 'Daily' : 'Weekly'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setIsCompactView((prev) => !prev)}
+            style={styles.viewToggleButton}
+          >
+            <Ionicons name={isCompactView ? 'grid-outline' : 'list-outline'} size={16} color="#14532d" />
+            <Text style={styles.viewToggleText}>{isCompactView ? 'Cards' : 'Compact'}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
 
-      {/* Log Button */}
+      {showDatePicker && (
+        <DateTimePicker
+          value={selectedDate}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'inline' : 'default'}
+          onChange={(event, date) => {
+            setShowDatePicker(false);
+            if (date) setSelectedDate(date);
+          }}
+        />
+      )}
+
+      {userMeals.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No meals logged yet</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
+          {(viewMode === 'weekly' ? Object.entries(groupedMeals) : [['', userMeals]]).map(
+            ([day, meals]) => (
+              <View key={day}>
+                {viewMode === 'weekly' && <Text style={styles.dayHeader}>{day}</Text>}
+                {meals.map((meal) => (
+                  <View key={meal.id} style={[styles.card, isCompactView && styles.compactCard]}>
+                    <View style={[styles.cardRow, isCompactView && { flexDirection: 'row' }]}>
+                     {meal.image && (
+                        <Image
+                          source={{ uri: meal.image }}
+                          style={isCompactView ? styles.compactImage : styles.fullImage}
+                          onError={() => console.warn("Image failed to load:", meal.image)}
+                        />
+                      )}
+                      <View style={[styles.cardContent, isCompactView && styles.compactCardContent]}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <Text style={styles.mealName}>{meal.name}</Text>
+                          <Text style={styles.kcal}>{meal.calories} kcal</Text>
+                        </View>
+                        <Text style={styles.description}>{meal.recipe || meal.description}</Text>
+                        <View style={styles.macros}>
+                          <Text style={styles.macroText}>Carbs: {meal.macros?.carbs || 0}g</Text>
+                          <Text style={styles.macroText}>Protein: {meal.macros?.protein || 0}g</Text>
+                          <Text style={styles.macroText}>Fat: {meal.macros?.fat || 0}g</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginTop: 10 }}>
+                          <TouchableOpacity onPress={() => handleEditMeal(meal)}>
+                            <Ionicons name="create-outline" size={20} color="#22c55e" style={{ marginRight: 16 }} />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => handleDeleteMeal(meal)}>
+                            <Ionicons name="trash-outline" size={20} color="#ef4444" />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )
+          )}
+        </ScrollView>
+      )}
+
       <TouchableOpacity
         style={styles.floatingButton}
         onPress={() => navigation.navigate('LogFoodModal')}
       >
         <Ionicons name="add" size={24} color="#fff" />
         <Text style={styles.floatingText}>Log Food</Text>
-      </TouchableOpacity>
-
-      {/* Sync Button */}
-      <TouchableOpacity
-        style={[styles.syncButton, synced && styles.syncDisabled]}
-        onPress={!synced ? syncWithFirebase : null}
-        disabled={synced}
-      >
-        <Ionicons name="cloud-upload-outline" size={20} color={synced ? '#9ca3af' : '#14532d'} />
-        <Text style={[styles.syncText, synced && { color: '#9ca3af' }]}>
-          {synced ? 'Synced' : 'Sync'}
-        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -191,24 +352,25 @@ export default function MealsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f9fafb',
+    backgroundColor: '#ffffff',
     paddingTop: 48,
     paddingHorizontal: 20,
   },
   header: {
-    fontSize: 22,
-    fontWeight: 'bold',
+    fontSize: 24,
+    fontWeight: '700',
     color: '#14532d',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   tabContainer: {
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: 12,
+    backgroundColor: '#ffffff',
     borderBottomWidth: 1,
-    borderBottomColor: '#d1fae5',
+    borderBottomColor: '#e5e7eb',
   },
   tabButton: {
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 16,
     marginRight: 12,
     borderBottomWidth: 2,
@@ -218,30 +380,78 @@ const styles = StyleSheet.create({
     borderBottomColor: '#22c55e',
   },
   tabText: {
-    fontSize: 16,
+    fontSize: 15,
     color: '#6b7280',
   },
   activeTabText: {
-    color: '#14532d',
+    color: '#22c55e',
     fontWeight: '600',
+  },
+  calendarRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  calendarButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+    borderRadius: 10,
+  },
+  calendarText: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#14532d',
+  },
+  viewToggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+  },
+  viewToggleText: {
+    marginLeft: 6,
+    color: '#14532d',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  dayHeader: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#4b5563',
+    marginBottom: 8,
+    marginTop: 10,
   },
   card: {
     backgroundColor: '#ffffff',
-    borderRadius: 14,
+    borderRadius: 16,
     marginBottom: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 10,
-    elevation: 2,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
   },
-  image: {
-    width: '100%',
-    height: 160,
+  cardRow: {
+    flexDirection: 'column',
+  },
+  compactCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  compactImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 50,
   },
   cardContent: {
-    padding: 14,
+    paddingTop: 8,
+  },
+  compactCardContent: {
+    paddingLeft: 12,
+    flex: 1,
   },
   mealName: {
     fontSize: 18,
@@ -250,29 +460,22 @@ const styles = StyleSheet.create({
   },
   description: {
     fontSize: 14,
-    color: '#4b5563',
-    marginVertical: 4,
+    color: '#6b7280',
+    marginVertical: 6,
   },
   kcal: {
     fontSize: 14,
-    color: '#ef4444',
-    marginBottom: 6,
+    color: '#dc2626',
     fontWeight: '500',
   },
   macros: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    marginTop: 6,
   },
   macroText: {
     fontSize: 13,
     color: '#6b7280',
-  },
-  totalCalories: {
-    textAlign: 'right',
-    marginTop: 8,
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
   },
   floatingButton: {
     position: 'absolute',
@@ -280,15 +483,15 @@ const styles = StyleSheet.create({
     left: 24,
     right: 24,
     backgroundColor: '#22c55e',
-    borderRadius: 14,
+    borderRadius: 16,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 14,
     shadowColor: '#22c55e',
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 6,
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
   },
   floatingText: {
     color: '#fff',
@@ -296,20 +499,47 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 8,
   },
-  syncButton: {
-    position: 'absolute',
-    top: 48,
-    right: 20,
-    flexDirection: 'row',
+  emptyContainer: {
     alignItems: 'center',
-    padding: 8,
+    justifyContent: 'center',
+    marginTop: 60,
   },
-  syncText: {
-    marginLeft: 6,
-    color: '#14532d',
+  emptyText: {
+    fontSize: 16,
     fontWeight: '500',
+    color: '#9ca3af',
+    marginTop: 12,
   },
-  syncDisabled: {
-    opacity: 0.6,
-  },
+headerRow: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center', // ensures vertical alignment
+  marginBottom: 16,
+},
+
+header: {
+  fontSize: 24,
+  fontWeight: '700',
+  color: '#14532d',
+},
+saveButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  paddingVertical: 6,
+  paddingHorizontal: 12,
+  height: 38, // make height match header text roughly
+},
+
+saveText: {
+  fontSize: 15,
+  fontWeight: '600',
+  color: '#22c55e',
+},
+fullImage: {
+  width: '100%',
+  height: 160,
+  borderRadius: 10,
+  marginBottom: 10,
+},
+
 });

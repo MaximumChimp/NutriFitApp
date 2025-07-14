@@ -12,15 +12,10 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
-import * as ImageManipulator from 'expo-image-manipulator';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import axios from 'axios';
-
-import { getAuth } from 'firebase/auth';
-import { db } from '../../../../config/firebase-config'; // Adjust path as needed
-import { collection, addDoc } from 'firebase/firestore';
+import * as FileSystem from 'expo-file-system';
 
 export default function LogFoodModal({ navigation }) {
   const [image, setImage] = useState(null);
@@ -32,9 +27,6 @@ export default function LogFoodModal({ navigation }) {
   const [fat, setFat] = useState('');
   const [mealType, setMealType] = useState('Breakfast');
   const [permissionsGranted, setPermissionsGranted] = useState(false);
-  const [imageUploading, setImageUploading] = useState(false);
-
-  const IMGBB_API_KEY = '5d3311f90ffc71914620a8d5c008eb9a';
 
   useEffect(() => {
     (async () => {
@@ -59,6 +51,23 @@ export default function LogFoodModal({ navigation }) {
     }, [navigation])
   );
 
+  const saveImageToLocal = async (imageUri) => {
+    const filename = imageUri.split('/').pop();
+    const newPath = `${FileSystem.documentDirectory}${filename}`;
+
+    try {
+      await FileSystem.copyAsync({
+        from: imageUri,
+        to: newPath,
+      });
+      return newPath; // return saved local path
+    } catch (error) {
+      console.error('Error saving image locally:', error);
+      return null;
+    }
+  };
+
+
   const pickImage = async (fromCamera = false) => {
     if (!permissionsGranted) return;
 
@@ -68,98 +77,63 @@ export default function LogFoodModal({ navigation }) {
 
     if (!result.canceled) {
       const asset = result.assets[0];
-      const manipulated = await ImageManipulator.manipulateAsync(
-        asset.uri,
-        [],
-        { base64: true }
-      );
-      setImage({ uri: asset.uri, base64: manipulated.base64 });
+      const localPath = await saveImageToLocal(asset.uri);
+
+      if (localPath) {
+        setImage({ uri: localPath }); // ✅ Set local URI
+      } else {
+        Alert.alert('Error', 'Could not save image locally.');
+      }
     }
   };
 
-    const uploadToImgBB = async (base64) => {
-    try {
-        const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: `image=${encodeURIComponent(base64)}`
-        });
+const handleSave = async () => {
+  if (!foodName || !kcal) {
+    Alert.alert('Missing Info', 'Please enter at least food name and calories.');
+    return;
+  }
 
-        const data = await response.json();
+  const now = new Date();
+  const timestamp = now.toLocaleString('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 
-        if (data.success) {
-        return data.data.url;
-        } else {
-        console.error('ImgBB API error:', data);
-        Alert.alert('Upload Failed', 'ImgBB responded with an error.');
-        return null;
-        }
-    } catch (err) {
-        console.error('ImgBB Upload Error:', err);
-        Alert.alert('Upload Failed', 'Network error while uploading image.');
-        return null;
-    }
-    };
+  const newMeal = {
+    id: `${Date.now()}_${Math.floor(Math.random() * 100000)}`,
+    name: foodName,
+    recipe,
+    image: image?.uri || null, // ✅ Use the local URI here
+    timestamp,
+    calories: isNaN(parseInt(kcal)) ? 0 : parseInt(kcal),
+    macros: {
+      carbs: isNaN(parseInt(carbs)) ? 0 : parseInt(carbs),
+      protein: isNaN(parseInt(protein)) ? 0 : parseInt(protein),
+      fat: isNaN(parseInt(fat)) ? 0 : parseInt(fat),
+    },
+    mealType,
+    createdAt: now.toISOString(),
+    synced: false,
+  };
 
+  try {
+    const storageKey = `loggedMeals_${mealType}`;
+    const stored = await AsyncStorage.getItem(storageKey);
+    const meals = stored ? JSON.parse(stored) : [];
 
-    const handleSave = async () => {
-    if (!foodName || !kcal) {
-        Alert.alert('Missing Info', 'Please enter at least food name and calories.');
-        return;
-    }
+    meals.push(newMeal);
+    await AsyncStorage.setItem(storageKey, JSON.stringify(meals));
 
-    let uploadedImageUrl = null;
-
-    if (image && image.base64) {
-        setImageUploading(true);
-        uploadedImageUrl = await uploadToImgBB(image.base64);
-        setImageUploading(false);
-        if (!uploadedImageUrl) return;
-    }
-
-    const now = new Date();
-    const timestamp = now.toLocaleString('en-US', {
-        weekday: 'short',
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-    });
-
-    const newMeal = {
-        id: Date.now().toString(),
-        name: foodName,
-        recipe,
-        image: uploadedImageUrl || null,
-        timestamp,
-        calories: parseInt(kcal),
-        macros: {
-        carbs: parseInt(carbs) || 0,
-        protein: parseInt(protein) || 0,
-        fat: parseInt(fat) || 0,
-        },
-        mealType,
-        createdAt: new Date(),
-        synced: false, // mark as unsynced for later sync
-    };
-
-    try {
-        const storageKey = `loggedMeals_${mealType}`;
-        const stored = await AsyncStorage.getItem(storageKey);
-        const meals = stored ? JSON.parse(stored) : [];
-        meals.push(newMeal);
-        await AsyncStorage.setItem(storageKey, JSON.stringify(meals));
-
-        Alert.alert('Saved', `${mealType} meal saved locally!`);
-        navigation.goBack();
-    } catch (error) {
-        console.error('Save Error:', error);
-        Alert.alert('Error', 'Failed to save meal locally.');
-    }
-    };
+    navigation.goBack();
+  } catch (error) {
+    console.error('[❌] Error saving meal:', error.message, error);
+    Alert.alert('Error', 'Failed to save meal locally.');
+  }
+};
 
   const renderTab = (type) => (
     <TouchableOpacity
@@ -193,7 +167,6 @@ export default function LogFoodModal({ navigation }) {
       </View>
 
       {image && <Image source={{ uri: image.uri }} style={styles.image} />}
-      {imageUploading && <Text style={{ color: '#14532d', marginBottom: 10 }}>Uploading image...</Text>}
 
       <TextInput style={styles.input} placeholder="Food Name" value={foodName} onChangeText={setFoodName} />
       <TextInput style={styles.input} placeholder="Recipe / Description" value={recipe} onChangeText={setRecipe} />
