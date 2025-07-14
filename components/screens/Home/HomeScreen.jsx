@@ -31,7 +31,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage'
 import { getAuth } from 'firebase/auth';
 import { Alert } from 'react-native';
 import moment from 'moment';
-
+import { useMealUpdate } from "../../context/MealUpdateContext";
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 const SIZE = 100;
@@ -104,6 +104,7 @@ function CircleProgress({ percent = 0, color = "#22c55e", value,target, label })
 }
 
 export default function HomeScreen({ navigation }) {
+  const { updateFlag } = useMealUpdate();
   const [greeting, setGreeting] = useState("Hello");
   const [showSidebar, setShowSidebar] = useState(false);
   const [userName, setUserName] = useState("");
@@ -146,7 +147,50 @@ const percentBurned = safeCaloriesTarget > 0
 const macros = macrosPercent;
 
 
+const loadLocalMealsForDate = async (date) => {
+  let totalCalories = 0;
+  let totalCarbs = 0;
+  let totalProtein = 0;
+  let totalFat = 0;
 
+  for (const tab of ['Breakfast', 'Lunch', 'Dinner']) {
+    const key = `loggedMeals_${tab}`;
+    const stored = await AsyncStorage.getItem(key);
+    const meals = stored ? JSON.parse(stored) : [];
+
+    const filtered = meals.filter((m) =>
+      moment(m.createdAt).isSame(moment(date), 'day')
+    );
+
+    for (const meal of filtered) {
+      totalCalories += meal.calories || 0;
+
+      // ✅ Safely read from nested macros
+      if (meal.macros) {
+        totalCarbs += meal.macros.carbs || 0;
+        totalProtein += meal.macros.protein || 0;
+        totalFat += meal.macros.fat || 0;
+      }
+    }
+  }
+
+  // ✅ Now update state directly
+  const tefValue = totalCalories * 0.1;
+
+  setCaloriesEaten(totalCalories);
+  setCaloriesLeft((tdee || 0) - totalCalories);
+  setCaloriesBurned(Math.round(tefValue));
+  setMacrosPercent({
+    carbs: Math.round(totalCarbs),
+    protein: Math.round(totalProtein),
+    fat: Math.round(totalFat),
+  });
+};
+
+
+useEffect(() => {
+    loadLocalMealsForDate(selectedDate);
+  }, [updateFlag]);
 
 useEffect(() => {
   const hour = new Date().getHours();
@@ -211,11 +255,14 @@ useEffect(() => {
   }
 }, [showSidebar]);
 
+
+  
 useEffect(() => {
   if (tdee) {
     loadLocalMealsForDate(selectedDate);
   }
 }, [selectedDate, tdee]);
+
 
 const animatedSidebarStyle = useAnimatedStyle(() => ({
   transform: [{ translateX: sidebarAnim.value }],
@@ -262,46 +309,6 @@ const handleLogout = async () => {
     </View>
   );
 }
-
-const loadLocalMealsForDate = async (date) => {
-  let totalCalories = 0;
-  let totalCarbs = 0;
-  let totalProtein = 0;
-  let totalFat = 0;
-
-  for (const tab of ['Breakfast', 'Lunch', 'Dinner']) {
-    const key = `loggedMeals_${tab}`;
-    const stored = await AsyncStorage.getItem(key);
-    const meals = stored ? JSON.parse(stored) : [];
-
-    const filtered = meals.filter((m) =>
-      moment(m.createdAt).isSame(moment(date), 'day')
-    );
-
-    for (const meal of filtered) {
-      totalCalories += meal.calories || 0;
-
-      // ✅ Safely read from nested macros
-      if (meal.macros) {
-        totalCarbs += meal.macros.carbs || 0;
-        totalProtein += meal.macros.protein || 0;
-        totalFat += meal.macros.fat || 0;
-      }
-    }
-  }
-
-  // ✅ Now update state directly
-  const tefValue = totalCalories * 0.1;
-
-  setCaloriesEaten(totalCalories);
-  setCaloriesLeft((tdee || 0) - totalCalories);
-  setCaloriesBurned(Math.round(tefValue));
-  setMacrosPercent({
-    carbs: Math.round(totalCarbs),
-    protein: Math.round(totalProtein),
-    fat: Math.round(totalFat),
-  });
-};
 
 
 function CircleSkeleton() {

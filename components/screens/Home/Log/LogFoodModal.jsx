@@ -14,20 +14,107 @@ import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect,useRoute} from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system';
+import { useMealUpdate } from '../../../context/MealUpdateContext';
+
+const dynamicTitles = {
+  morning: {
+    Breakfast: [
+      "Good morning! What’s for breakfast?",
+      "Start your day right",
+      "Morning fuel: Log your meal",
+    ],
+    Snack: [
+      "Morning snack time",
+      "Quick bite before lunch?",
+    ]
+  },
+  afternoon: {
+    Lunch: [
+      "Time for lunch",
+      "Midday meal tracker",
+      "Fuel your afternoon",
+    ],
+    Snack: [
+      "Afternoon snack",
+      "Light bite before dinner?"
+    ]
+  },
+  evening: {
+    Dinner: [
+      "Dinner time",
+      "Evening nourishment",
+      "Log your last meal of the day",
+    ]
+  },
+  default: {
+    Breakfast: ["Log your meal"],
+    Lunch: ["Log your meal"],
+    Dinner: ["Log your meal"]
+  }
+};
+
 
 export default function LogFoodModal({ navigation }) {
-  const [image, setImage] = useState(null);
-  const [foodName, setFoodName] = useState('');
-  const [recipe, setRecipe] = useState('');
-  const [kcal, setKcal] = useState('');
-  const [carbs, setCarbs] = useState('');
-  const [protein, setProtein] = useState('');
-  const [fat, setFat] = useState('');
-  const [mealType, setMealType] = useState('Breakfast');
+  const { triggerMealUpdate } = useMealUpdate();
+  const route = useRoute();
+  const { mealToEdit } = route.params || {};
+  const [image, setImage] = useState(mealToEdit?.image ? { uri: mealToEdit.image } : null);
+  const [foodName, setFoodName] = useState(mealToEdit?.name || '');
+  const [recipe, setRecipe] = useState(mealToEdit?.recipe || mealToEdit?.description || '');
+  const [kcal, setKcal] = useState(mealToEdit?.calories?.toString() || '');
+  const [carbs, setCarbs] = useState(mealToEdit?.macros?.carbs?.toString() || '');
+  const [protein, setProtein] = useState(mealToEdit?.macros?.protein?.toString() || '');
+  const [fat, setFat] = useState(mealToEdit?.macros?.fat?.toString() || '');
   const [permissionsGranted, setPermissionsGranted] = useState(false);
 
+  const validMealTypes = ['Breakfast', 'Lunch', 'Dinner'];
+   
+  const getDynamicTitle = () => {
+
+    if (mealToEdit) return "Update your meal";
+    
+    const segment = getTimeSegment();
+    const safeMealType = validMealTypes.includes(mealType) ? mealType : "Breakfast";
+
+    const mealTitles =
+      dynamicTitles[segment]?.[safeMealType] ||
+      dynamicTitles.default[safeMealType] ||
+      ["Log your meal"];
+
+    const randomIndex = Math.floor(Math.random() * mealTitles.length);
+    return mealTitles[randomIndex];
+     
+  };
+
+
+  const getMealTypeByTime = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 11) return 'Breakfast';
+    if (hour >= 11 && hour < 17) return 'Lunch';
+    return 'Dinner'; // covers evening and night
+  };
+
+  const [mealType, setMealType] = useState(
+    mealToEdit?.mealType || getMealTypeByTime()
+  );
+
+  const getTimeSegment = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 11) return 'morning';
+    if (hour >= 11 && hour < 17) return 'afternoon';
+    if (hour >= 17 || hour < 5) return 'evening';
+    return 'default';
+  };
+
+
+  useEffect(() => {
+    setDynamicTitle(getDynamicTitle());
+  }, [mealType]);
+
+  
+    const [dynamicTitle, setDynamicTitle] = useState(getDynamicTitle());
   useEffect(() => {
     (async () => {
       const camStatus = await ImagePicker.requestCameraPermissionsAsync();
@@ -87,53 +174,63 @@ export default function LogFoodModal({ navigation }) {
     }
   };
 
-const handleSave = async () => {
-  if (!foodName || !kcal) {
-    Alert.alert('Missing Info', 'Please enter at least food name and calories.');
-    return;
-  }
+  const handleSave = async () => {
+    if (!foodName || !kcal) {
+      Alert.alert('Missing Info', 'Please enter at least food name and calories.');
+      return;
+    }
 
-  const now = new Date();
-  const timestamp = now.toLocaleString('en-US', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+    const now = new Date();
+    const isEdit = !!mealToEdit;
+    const id = isEdit ? mealToEdit.id : `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
 
-  const newMeal = {
-    id: `${Date.now()}_${Math.floor(Math.random() * 100000)}`,
-    name: foodName,
-    recipe,
-    image: image?.uri || null, // ✅ Use the local URI here
-    timestamp,
-    calories: isNaN(parseInt(kcal)) ? 0 : parseInt(kcal),
-    macros: {
-      carbs: isNaN(parseInt(carbs)) ? 0 : parseInt(carbs),
-      protein: isNaN(parseInt(protein)) ? 0 : parseInt(protein),
-      fat: isNaN(parseInt(fat)) ? 0 : parseInt(fat),
-    },
-    mealType,
-    createdAt: now.toISOString(),
-    synced: false,
+    const newMeal = {
+      id,
+      name: foodName,
+      recipe,
+      image: image?.uri || null,
+      timestamp: isEdit ? mealToEdit.timestamp : now.toLocaleString('en-US', {
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      calories: isNaN(parseInt(kcal)) ? 0 : parseInt(kcal),
+      macros: {
+        carbs: isNaN(parseInt(carbs)) ? 0 : parseInt(carbs),
+        protein: isNaN(parseInt(protein)) ? 0 : parseInt(protein),
+        fat: isNaN(parseInt(fat)) ? 0 : parseInt(fat),
+      },
+      mealType,
+      createdAt: isEdit ? mealToEdit.createdAt : now.toISOString(),
+      synced: false,
+    };
+
+    try {
+      const storageKey = `loggedMeals_${mealType}`;
+      const stored = await AsyncStorage.getItem(storageKey);
+      let meals = stored ? JSON.parse(stored) : [];
+
+      if (isEdit) {
+        // Replace existing meal
+        meals = meals.map((m) => (m.id === id ? newMeal : m));
+      } else {
+        // Add new meal
+        meals.push(newMeal);
+      }
+
+      await AsyncStorage.setItem(storageKey, JSON.stringify(meals));
+      triggerMealUpdate();
+      navigation.goBack();
+    } catch (error) {
+      console.error('[❌] Error saving meal:', error.message, error);
+      Alert.alert('Error', 'Failed to save meal locally.');
+    }
   };
 
-  try {
-    const storageKey = `loggedMeals_${mealType}`;
-    const stored = await AsyncStorage.getItem(storageKey);
-    const meals = stored ? JSON.parse(stored) : [];
-
-    meals.push(newMeal);
-    await AsyncStorage.setItem(storageKey, JSON.stringify(meals));
-
-    navigation.goBack();
-  } catch (error) {
-    console.error('[❌] Error saving meal:', error.message, error);
-    Alert.alert('Error', 'Failed to save meal locally.');
-  }
-};
+  
 
   const renderTab = (type) => (
     <TouchableOpacity
@@ -149,7 +246,7 @@ const handleSave = async () => {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Log New Food</Text>
+      <Text style={styles.title}>{dynamicTitle}</Text>
 
       <View style={styles.tabContainer}>
         {['Breakfast', 'Lunch', 'Dinner'].map(renderTab)}
@@ -191,6 +288,8 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 40,
     backgroundColor: '#f9fafb',
+    paddingTop: 48,
+    paddingHorizontal: 20,
   },
   title: {
     fontSize: 22,

@@ -17,7 +17,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { db, auth } from '../../../config/firebase-config';
 import moment from 'moment';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
-
+import { useMealUpdate } from '../../context/MealUpdateContext';
 export default function MealsScreen() {
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState('Breakfast');
@@ -27,7 +27,7 @@ export default function MealsScreen() {
   const [viewMode, setViewMode] = useState('weekly');
   const [isCompactView, setIsCompactView] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-
+  const { triggerMealUpdate } = useMealUpdate();
   const tabs = ['Breakfast', 'Lunch', 'Dinner'];
 
   const getWeekRange = (date) => {
@@ -183,6 +183,7 @@ const handleSaveToFirebase = async () => {
     }
 
     await AsyncStorage.setItem('syncedMealIds', JSON.stringify(localIds));
+    triggerMealUpdate();
     Alert.alert('Success', 'Meals Saved!');
   } catch (err) {
     console.error('Sync Error:', err);
@@ -204,6 +205,7 @@ const handleSaveToFirebase = async () => {
       await AsyncStorage.setItem(key, JSON.stringify(filtered)); // Save updated list to AsyncStorage
 
       Alert.alert('Deleted', `${meal.name} has been removed.`); // Show success alert
+      triggerMealUpdate();
       loadLocalMeals(); // Reload meals into state
     } catch (err) {
       console.error('Delete Error:', err);

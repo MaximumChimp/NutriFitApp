@@ -22,7 +22,7 @@ import MealsScreen from './components/screens/Home/MealsScreen';
 import * as SplashScreenNative from 'expo-splash-screen';
 import { auth } from './config/firebase-config';
 import { onAuthStateChanged } from 'firebase/auth';
-
+import { MealUpdateProvider } from './components/context/MealUpdateContext';
 
 
 const Stack = createNativeStackNavigator();
@@ -74,20 +74,22 @@ export default function App() {
   return (
     <GluestackUIProvider config={config}>
       <StatusBar style="auto" />
-      <NavigationContainer>
-        <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
-          <Stack.Screen name="Landing" component={LandingScreen} />
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="GetStarted" component={GetStarted} />
-          <Stack.Screen name="SignUpWithEmail" component={SignUpWithEmail} />
-          <Stack.Screen name="MainTabs" component={MainTabs} />
-          <Stack.Screen name="Profile" component={ProfileScreen} />
-          <Stack.Screen name="Meals" component={MealsScreen} />
-          <Stack.Group screenOptions={{ presentation: 'modal' }}>
-            <Stack.Screen name="LogFoodModal" component={LogFoodModal} options={{ title: "Log New Food" }} />
-          </Stack.Group>
-        </Stack.Navigator>
-      </NavigationContainer>
+      <MealUpdateProvider>
+        <NavigationContainer>
+          <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRoute}>
+            <Stack.Screen name="Landing" component={LandingScreen} />
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="GetStarted" component={GetStarted} />
+            <Stack.Screen name="SignUpWithEmail" component={SignUpWithEmail} />
+            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="Meals" component={MealsScreen} />
+            <Stack.Group screenOptions={{ presentation: 'modal' }}>
+              <Stack.Screen name="LogFoodModal" component={LogFoodModal} options={{ title: "Log New Food" }} />
+            </Stack.Group>
+          </Stack.Navigator>
+        </NavigationContainer>
+      </MealUpdateProvider>
     </GluestackUIProvider>
   );
 }
