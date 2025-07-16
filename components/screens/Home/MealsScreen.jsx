@@ -177,6 +177,7 @@ const handleSaveToFirebase = async () => {
 
       await setDoc(doc(db, 'users', userId, 'meals', meal.id), {
         ...updatedMeal,
+        uid: userId,
         mealType: meal.mealType || activeTab,
         syncedAt: Date.now(),
       });

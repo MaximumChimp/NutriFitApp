@@ -23,7 +23,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import { auth, db } from "@/config/firebase-config";
-import { doc, getDoc, collection, getDocs,addDoc} from "firebase/firestore";
+import { doc, getDoc, collection,query,orderBy, getDocs,addDoc} from "firebase/firestore";
 import { Dimensions } from "react-native";
 const screenWidth = Dimensions.get("window").width;
 const CARD_WIDTH = screenWidth - 48;
@@ -335,57 +335,57 @@ function MacroSkeleton() {
 }
 
 
-
 const handleSync = async () => {
   const auth = getAuth();
   const currentUser = auth.currentUser;
+
   if (!currentUser) {
-    Alert.alert('Error', 'User not logged in');
+    Alert.alert("Error", "User not logged in.");
     return;
   }
 
   try {
-    const snapshot = await getDocs(collection(db, 'users', currentUser.uid, 'meals'));
+    const mealsRef = collection(db, "users", currentUser.uid, "meals");
+    const q = query(mealsRef, orderBy("createdAt", "desc"));
+    const snapshot = await getDocs(q);
+
     const mealsByType = { Breakfast: [], Lunch: [], Dinner: [] };
-    const mealIds = [];
 
     for (const docSnap of snapshot.docs) {
       const meal = docSnap.data();
       const mealId = docSnap.id;
       meal.id = mealId;
 
-      // ✅ Set a fallback createdAt date if missing
       if (!meal.createdAt) {
         meal.createdAt = new Date().toISOString();
       }
 
-      // ✅ Use existing image URL from Firestore (ImgBB)
-      if (!meal.image || !meal.image.startsWith('http')) {
-        console.warn(`Meal ${meal.name || mealId} is missing a valid image URL.`);
-      }
-
-      const type = meal.mealType || 'Breakfast';
+      const type = meal.mealType || "Breakfast";
       if (!mealsByType[type]) mealsByType[type] = [];
       mealsByType[type].push(meal);
-      mealIds.push(mealId);
     }
 
+    // Merge Firebase meals with existing local ones
+    for (const [type, firebaseMeals] of Object.entries(mealsByType)) {
+      const key = `loggedMeals_${type}`;
+      const existingRaw = await AsyncStorage.getItem(key);
+      const existingMeals = existingRaw ? JSON.parse(existingRaw) : [];
 
-    // Save meals to AsyncStorage
-    for (const [type, meals] of Object.entries(mealsByType)) {
-      await AsyncStorage.setItem(`loggedMeals_${type}`, JSON.stringify(meals));
+      // Merge by avoiding duplicates (based on meal.id)
+      const existingIds = new Set(existingMeals.map(m => m.id));
+      const newMeals = firebaseMeals.filter(m => !existingIds.has(m.id));
+      const mergedMeals = [...existingMeals, ...newMeals];
+
+      await AsyncStorage.setItem(key, JSON.stringify(mergedMeals));
     }
 
-    // Save synced meal IDs
-    await AsyncStorage.setItem('syncedMealIds', JSON.stringify(mealIds));
-
-    // ✅ Refresh HomeScreen data using selectedDate
+    // Refresh HomeScreen data using selectedDate
     await loadLocalMealsForDate(selectedDate);
 
-    Alert.alert('Success', 'Meals and images loaded from Firebase.');
+    Alert.alert("Success", "New meals have been merged from Firebase.");
   } catch (error) {
-    console.error('handleSync Error:', error);
-    Alert.alert('Sync Failed', 'Unable to load meals from Firebase.');
+    console.error("handleSync Error:", error);
+    Alert.alert("Sync Failed", "Unable to sync meals.");
   }
 };
 
@@ -815,7 +815,7 @@ dateTextWrapper: {
   alignItems: "center",
 },
 dateText: {
-  fontSize: 20,
+  fontSize: 18,
   fontWeight: "bold",
   color: "#14532d",
 },  

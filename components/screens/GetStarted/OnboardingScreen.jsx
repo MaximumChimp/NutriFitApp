@@ -1,7 +1,4 @@
-import React, { useState } from "react";
-import { FontAwesome } from '@expo/vector-icons';
-
-
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -14,69 +11,63 @@ import {
   Alert,
   Modal,
   Platform,
-  Animated, 
-  Easing
+  Animated,
+  Easing,
 } from "react-native";
 import { Picker } from "@react-native-picker/picker";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useRoute } from "@react-navigation/native";
-import { useEffect } from "react";
 
 const { width } = Dimensions.get("window");
 
+  const steps = [
+    "Let’s start with your name.",
+    "What’s your Last Name?",
+    "What is your Gender?",
+    "Weight",
+    "Height",
+    "What is your goal?",
+    "Target Weight Change",
+    "What is your Activity level?",
+    "Do you have any health conditions?",
+    "Allergy Details",
+    "When is your Birthday?",
+  ];
 
-
-
-const steps = [
-  "Let’s start with your name.",
-  "Setting Up Your Profile",
-  "What is your goal?",
-  "Target Weight Change",
-  "What is your Gender?",
-  "What is your Activity level?",
-  "Weight",
-  "Height",
-  "When is your Birthday?",
-];
 
 const calculateAge = (birthdayString) => {
   const birthDate = new Date(birthdayString);
   const today = new Date();
   let age = today.getFullYear() - birthDate.getFullYear();
   const m = today.getMonth() - birthDate.getMonth();
-
-  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-    age--;
-  }
-
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) age--;
   return age;
 };
 
 const convertFtInToCm = (ftInStr) => {
   const match = ftInStr.match(/(\d+)' (\d+)"/);
   if (!match) return null;
-
   const feet = parseInt(match[1]);
   const inches = parseInt(match[2]);
-  const totalInches = feet * 12 + inches;
-  const cm = totalInches * 2.54;
-  return cm.toFixed(1); 
+  return (feet * 12 + inches) * 2.54;
 };
 
 export default function OnboardingScreen({ navigation }) {
-  const scaleAnim = React.useRef(new Animated.Value(0.8)).current;
-const opacityAnim = React.useRef(new Animated.Value(0)).current;
-  
-  const [agreed, setAgreed] = useState(null);
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
   const [modalVisible, setModalVisible] = useState(true);
+  const [agreed, setAgreed] = useState(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [isCurrentStepValid, setIsCurrentStepValid] = useState(false);
   const [isAuthPromptVisible, setAuthPromptVisible] = useState(false);
+  const [showCustomGoalOptions, setShowCustomGoalOptions] = useState(false);
   const [userData, setUserData] = useState({
-    Name: "",
+    firstName: "",
+    lastName: "",
     Age: "",
+    Goal: "",
     Gender: "",
     Birthday: "",
     Height: "",
@@ -85,146 +76,180 @@ const opacityAnim = React.useRef(new Animated.Value(0)).current;
     Weight: "",
     WeightUnit: "kg",
     Activity: "",
-    Goal: "",
-    TargetKg: "",          
-    TargetKgUnit: "kg",     
+    TargetKg: "",
+    TargetKgUnit: "kg",
+    HealthConditions: [],
+    OtherHealthCondition: "",
+    AllergyDetails: "",
+    Medications: "",
   });
+
+  const derivedSteps = [...steps];
+if (
+  userData.HealthConditions?.includes("Allergies") &&
+  !derivedSteps.includes("Allergy Details")
+) {
+  derivedSteps.splice(9, 0, "Allergy Details"); // Insert before Birthday
+}
+
+
   const route = useRoute();
-const cameFromLogin = route.params?.fromLogin === true;
+  const cameFromLogin = route.params?.fromLogin === true;
 
-React.useEffect(() => {
-  if (modalVisible || isAuthPromptVisible) {
-    Animated.parallel([
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 300,
-        easing: Easing.out(Easing.ease),
-        useNativeDriver: true,
-      }),
-      Animated.timing(opacityAnim, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  } else {
-    scaleAnim.setValue(0.8);
-    opacityAnim.setValue(0);
-  }
-}, [modalVisible, isAuthPromptVisible]);
-
-
-//   React.useEffect(() => {
-//   if (modalVisible) {
-//     Animated.parallel([
-//       Animated.timing(scaleAnim, {
-//         toValue: 1,
-//         duration: 300,
-//         useNativeDriver: true,
-//         easing: Easing.out(Easing.exp),
-//       }),
-//       Animated.timing(opacityAnim, {
-//         toValue: 1,
-//         duration: 300,
-//         useNativeDriver: true,
-//       }),
-//     ]).start();
-//   }
-// }, [modalVisible]);
+  useEffect(() => {
+    const animate = () => {
+      Animated.parallel([
+        Animated.timing(scaleAnim, {
+          toValue: 1,
+          duration: 300,
+          easing: Easing.out(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacityAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    };
+    if (modalVisible || isAuthPromptVisible) animate();
+    else {
+      scaleAnim.setValue(0.8);
+      opacityAnim.setValue(0);
+    }
+  }, [modalVisible, isAuthPromptVisible]);
 
   const handleAgree = () => {
     setAgreed(true);
     setModalVisible(false);
   };
 
-
   const handleDisagree = () => {
     setModalVisible(false);
     setTimeout(() => {
-      if (cameFromLogin) {
-        navigation.replace("Login"); 
-      } else {
-        navigation.replace("Landing"); 
-      }
+      if (cameFromLogin) navigation.replace("Login");
+      else navigation.replace("Landing");
     }, 300);
   };
 
+  const calculateBMI = (weightKg, heightCm) => {
+  if (!weightKg || !heightCm) return null;
+  const h = heightCm / 100;
+  return weightKg / (h * h);
+};
+
+
   const handleInputChange = (key, value) => {
-    setUserData({ ...userData, [key]: value });
+    setUserData((prev) => ({ ...prev, [key]: value }));
   };
 
-  React.useEffect(() => {
-  const isValid = validateStep(false);  // disable alerts
-  setIsCurrentStepValid(isValid);
-}, [userData, currentStep]);
+  const toggleHealthCondition = (condition) => {
+    const current = userData.HealthConditions;
+    if (current.includes(condition)) {
+      setUserData({
+        ...userData,
+        HealthConditions: current.filter((c) => c !== condition),
+      });
+    } else {
+      setUserData({
+        ...userData,
+        HealthConditions: [...current, condition],
+      });
+    }
+  };
+
+  useEffect(() => {
+    const valid = validateStep(false);
+    setIsCurrentStepValid(valid);
+  }, [userData, currentStep]);
 
 const validateStep = (showAlerts = true) => {
   const key = steps[currentStep];
-  const newErrors = {};
 
-  if (key === "Let’s start with your name." && (!userData.Name || userData.Name.trim().length < 2)) {
-    if (showAlerts) Alert.alert("Invalid Input", "Please enter your name.");
+  if (key === steps[0] && (!userData.firstName || userData.firstName.trim().length < 2)) {
+    showAlerts && Alert.alert("Enter your first name.");
     return false;
   }
 
-  if (key === "What is your goal?" && !userData.Goal) {
-    if (showAlerts) Alert.alert("Invalid Input", "Please select your goal.");
+  if (key === steps[1] && (!userData.lastName || userData.lastName.trim().length < 2)) {
+    showAlerts && Alert.alert("Enter your last name.");
     return false;
   }
 
-  if (key === "Target Weight Change") {
-    const target = parseFloat(userData.TargetKg || "0");
-    if (!target || target <= 0) {
-      if (showAlerts) Alert.alert("Invalid Input", "Please enter a valid target weight.");
-      return false;
-    }
-  }
-
-  if (key === "What is your Gender?" && !userData.Gender) {
-    if (showAlerts) Alert.alert("Invalid Input", "Please select your gender.");
+  if (key === steps[2] && !userData.Gender) {
+    showAlerts && Alert.alert("Select gender.");
     return false;
   }
 
-  if (key === "What is your Activity level?" && !userData.Activity) {
-    if (showAlerts) Alert.alert("Invalid Input", "Please select your activity level.");
-    return false;
-  }
-
-  if (key === "Weight") {
+  if (key === steps[3]) {
     const weight = parseFloat(userData.Weight);
-    const target = parseFloat(userData.TargetKg);
-
     if (!weight || weight < 20 || weight > 500) {
-      if (showAlerts) Alert.alert("Invalid Input", "Please enter a valid weight.");
-      return false;
-    }
-
-    if (userData.Goal === "Weight Loss" && target >= weight) {
-      if (showAlerts) Alert.alert("Invalid Target", "For weight loss, your target weight must be lower than your current weight.");
-      return false;
-    }
-
-    if (userData.Goal === "Weight Gain" && target <= weight) {
-      if (showAlerts) Alert.alert("Invalid Target", "For weight gain, your target weight must be higher than your current weight.");
+      showAlerts && Alert.alert("Enter valid weight.");
       return false;
     }
   }
 
-  if (key === "Height") {
+  if (key === steps[4]) {
     if (userData.HeightUnit === "cm") {
       const height = parseFloat(userData.Height);
       if (!height || height < 50 || height > 300) {
-        if (showAlerts) Alert.alert("Invalid Input", "Enter a valid height in cm.");
+        showAlerts && Alert.alert("Enter valid height in cm.");
         return false;
       }
     } else if (!userData.HeightFtIn) {
-      if (showAlerts) Alert.alert("Invalid Input", "Select your height in ft/in.");
+      showAlerts && Alert.alert("Select height in ft/in.");
       return false;
     }
   }
 
-  if (key === "When is your Birthday?" && !userData.Birthday) {
-    if (showAlerts) Alert.alert("Invalid Input", "Please select your birthday.");
+  if (key === steps[5] && !userData.Goal) {
+    showAlerts && Alert.alert("Select your goal.");
+    return false;
+  }
+
+  if (key === steps[6]) {
+    const target = parseFloat(userData.TargetKg);
+    if (!target || target <= 0) {
+      showAlerts && Alert.alert("Enter a valid target weight.");
+      return false;
+    }
+
+    const weight = parseFloat(userData.Weight);
+    let targetKg = target;
+    if (userData.TargetKgUnit === "lb") {
+      targetKg *= 0.453592;
+    }
+
+    if (userData.Goal === "Weight Loss" && targetKg >= weight) {
+      showAlerts && Alert.alert("Target must be lower than current weight.");
+      return false;
+    }
+
+    if (userData.Goal === "Weight Gain" && targetKg <= weight) {
+      showAlerts && Alert.alert("Target must be higher than current weight.");
+      return false;
+    }
+  }
+
+  if (key === steps[7] && !userData.Activity) {
+    showAlerts && Alert.alert("Select activity level.");
+    return false;
+  }
+
+  if (key === steps[8]) {
+    const selected = userData.HealthConditions;
+    if (!selected.length || (selected.includes("None") && selected.length > 1)) {
+      showAlerts && Alert.alert("Choose one or 'None'.");
+      return false;
+    }
+    if (selected.includes("Others") && !userData.OtherHealthCondition?.trim()) {
+      showAlerts && Alert.alert("Specify other health condition.");
+      return false;
+    }
+  }
+
+  if (key === steps[9] && !userData.Birthday) {
+    showAlerts && Alert.alert("Select your birthday.");
     return false;
   }
 
@@ -234,96 +259,421 @@ const validateStep = (showAlerts = true) => {
 
 
 const handleNext = () => {
+  if (!validateStep(true)) return;
+
   const key = steps[currentStep];
 
-  if (!validateStep(true)) return; // now alerts only show when "Next" is clicked
+  // --- Goal step confirmation ---
+  if (key === "What is your goal?") {
+    const heightCm =
+      userData.HeightUnit === "cm"
+        ? parseFloat(userData.Height)
+        : convertFtInToCm(userData.HeightFtIn);
 
+    const weightKg =
+      userData.WeightUnit === "kg"
+        ? parseFloat(userData.Weight)
+        : parseFloat(userData.Weight) * 0.453592;
+
+    const bmi = calculateBMI(weightKg, heightCm);
+    let suggestedGoal = null;
+
+    if (bmi) {
+      if (bmi < 18.5) suggestedGoal = "Weight Gain";
+      else if (bmi >= 18.5 && bmi < 25) suggestedGoal = "Maintain my current weight";
+      else suggestedGoal = "Weight Loss";
+    }
+
+    if (
+      userData.Goal !== suggestedGoal &&
+      userData.Goal !== "Maintain my current weight"
+    ) {
+      Alert.alert(
+        "Are you sure?",
+        `The suggested goal based on your BMI is "${suggestedGoal}". Do you want to continue with "${userData.Goal}"?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Continue",
+            onPress: () => {
+              if (userData.Goal === "Maintain my current weight") {
+                setCurrentStep((prev) => prev + 2); // skip target weight
+              } else {
+                setCurrentStep((prev) => prev + 1);
+              }
+            },
+          },
+        ]
+      );
+      return;
+    }
+  }
+
+  // --- Skip Target Weight Change if goal is Maintain ---
   if (key === "What is your goal?" && userData.Goal === "Maintain my current weight") {
-    setCurrentStep(currentStep + 2);
+    setCurrentStep((prev) => prev + 2); // Skip Target Weight Change
     return;
   }
 
+  // --- Allergy handling: inject Allergy step only if Allergies is selected ---
+  const currentStepKey = steps[currentStep];
+  const nextStepKey = steps[currentStep + 1];
+
+  if (
+    currentStepKey === "Do you have any health conditions?" &&
+    userData.HealthConditions.includes("Allergies")
+  ) {
+    // Inject "Allergy Details" after health conditions
+    setCurrentStep((prev) => prev + 1);
+    return;
+  }
+
+  // --- If current step is Allergy Details, go to Birthday ---
+  if (key === "Allergy Details") {
+    setCurrentStep(steps.indexOf("When is your Birthday?"));
+    return;
+  }
+
+  // --- Normal step forward ---
   if (currentStep < steps.length - 1) {
-    setCurrentStep(currentStep + 1);
-    return;
+    setCurrentStep((prev) => prev + 1);
+  } else {
+    const age = calculateAge(userData.Birthday);
+    let finalHeight = userData.Height;
+
+    if (userData.HeightUnit === "ftin") {
+      finalHeight = convertFtInToCm(userData.HeightFtIn);
+    }
+
+    setUserData((prev) => ({
+      ...prev,
+      Age: age,
+      Height: finalHeight,
+      HeightUnit: "cm",
+    }));
+
+    setAuthPromptVisible(true);
   }
-
-  const age = calculateAge(userData.Birthday);
-  let finalHeightCm = userData.Height;
-
-  if (userData.HeightUnit === "ftin") {
-    finalHeightCm = convertFtInToCm(userData.HeightFtIn);
-  }
-
-  setUserData((prev) => ({
-    ...prev,
-    Age: age,
-    Height: finalHeightCm,
-    HeightUnit: "cm",
-  }));
-
-  setAuthPromptVisible(true);
 };
 
-  const handleBack = () => {
-     if (
-      steps[currentStep] === "What is your Gender?" &&
-      userData.Goal === "Maintain my current weight"
-      ) {
-        setCurrentStep(currentStep - 2); // go back to "What is your goal?"
-      } else if (currentStep > 0) {
-        setCurrentStep(currentStep - 1);
-      }
-  };
 
-  const renderGenderSelection = () => (
-    <>
-    <View style={styles.genderGrid}>
-      {["Male", "Female"].map((gender) => (
-        <TouchableOpacity
-          key={gender}
-          style={[
-            styles.genderBox,
-            userData.Gender === gender && styles.genderBoxSelected,
-          ]}
-          onPress={() => handleInputChange("Gender", gender)}
-        >
-          <Ionicons
-            name={gender === "Male" ? "male" : "female"}
-            size={32}
-            color={userData.Gender === gender ? "#fff" : "#4b5563"}
-            style={{ marginBottom: 8 }}
-          />
-          <Text
+const handleBack = () => {
+  let prev = currentStep;
+
+  // If we're at Target Weight Change AND the goal is "Maintain", skip 2 steps back to "What is your goal?"
+  if (steps[currentStep] === "Target Weight Change" && userData.Goal === "Maintain my current weight") {
+    prev = currentStep - 2;
+    setCurrentStep(prev);
+  }
+  // If we're at the step *after* Target Weight Change (like Birthday), and skipped Target step earlier
+  else if (
+    steps[currentStep - 1] === "Target Weight Change" &&
+    userData.Goal === "Maintain my current weight"
+  ) {
+    prev = currentStep - 2;
+    setCurrentStep(prev);
+  }
+  else if (currentStep > 0) {
+    prev = currentStep - 1;
+    setCurrentStep(prev);
+  }
+
+  setTimeout(() => {
+    if (steps[prev] === "What is your goal?") {
+      setShowCustomGoalOptions(false);
+    }
+  }, 50);
+};
+
+
+
+useEffect(() => {
+  const key = steps[currentStep];
+  if (key === "What is your goal?") {
+    setShowCustomGoalOptions(false);
+  }
+}, [currentStep]);
+const renderStep = () => {
+  const key = steps[currentStep];
+
+  if (key === "Let’s start with your name.") {
+    return (
+      <>
+        <Text style={styles.subtitle}>
+          Hi! We'd like to get to know you to make the NutriFit app personalized to you.
+        </Text>
+        <TextInput
+          placeholder="Enter your first name"
+          value={userData.firstName}
+          onChangeText={(text) => handleInputChange("firstName", text)}
+          style={styles.input}
+          placeholderTextColor="#9ca3af"
+        />
+      </>
+    );
+  }
+
+  if (key === "What’s your Last Name?") {
+    return (
+      <TextInput
+        placeholder="Enter your last name"
+        value={userData.lastName}
+        onChangeText={(text) => handleInputChange("lastName", text)}
+        style={styles.input}
+        placeholderTextColor="#9ca3af"
+      />
+    );
+  }
+
+  if (key === "What is your Gender?") {
+    return (
+      <View style={styles.genderGrid}>
+        {["Male", "Female"].map((gender) => (
+          <TouchableOpacity
+            key={gender}
             style={[
-              styles.genderText,
-              userData.Gender === gender && styles.genderTextSelected,
+              styles.genderBox,
+              userData.Gender === gender && styles.genderBoxSelected,
             ]}
+            onPress={() => handleInputChange("Gender", gender)}
           >
-            {gender}
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-    </>
-  );
+            <Ionicons
+              name={gender === "Male" ? "male" : "female"}
+              size={32}
+              color={userData.Gender === gender ? "#fff" : "#4b5563"}
+              style={{ marginBottom: 8 }}
+            />
+            <Text
+              style={[
+                styles.genderText,
+                userData.Gender === gender && styles.genderTextSelected,
+              ]}
+            >
+              {gender}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  }
 
-  const renderStep = () => {
-    const key = steps[currentStep];
-    if (key === "Setting Up Your Profile") {
+  if (key === "Weight") {
+    return (
+      <View style={styles.inlineRow}>
+        <TextInput
+          placeholder="Weight"
+          value={userData.Weight}
+          onChangeText={(text) =>
+            handleInputChange("Weight", text.replace(/[^0-9.]/g, ""))
+          }
+          style={styles.weightInput}
+          keyboardType="numeric"
+          placeholderTextColor="#9ca3af"
+        />
+        <View style={styles.pickerContainer}>
+          <Picker
+            selectedValue={userData.WeightUnit}
+            onValueChange={(value) => handleInputChange("WeightUnit", value)}
+            style={styles.picker}
+          >
+            <Picker.Item label="kg" value="kg" />
+            <Picker.Item label="lb" value="lb" />
+          </Picker>
+        </View>
+      </View>
+    );
+  }
+
+  if (key === "Height") {
+    if (userData.HeightUnit === "cm") {
       return (
-        <View style={styles.infoContainer}>
-          <Text style={styles.infoText}>
-            To set up your goals, we will start by calculating your RDI or
-            recommended daily intake. This is how much food you should, ideally,
-            be consuming each day. It is affected by your nutrition goal,
-            activity level, age, height, and other characteristics unique to you.
-          </Text>
+        <View style={styles.inlineRow}>
+          <TextInput
+            placeholder="Height"
+            value={userData.Height}
+            onChangeText={(text) =>
+              handleInputChange("Height", text.replace(/[^0-9.]/g, ""))
+            }
+            style={styles.smallInput}
+            keyboardType="numeric"
+            placeholderTextColor="#9ca3af"
+          />
+          <View style={styles.pickerContainerFixed}>
+            <Picker
+              selectedValue={userData.HeightUnit}
+              onValueChange={(value) => handleInputChange("HeightUnit", value)}
+              style={styles.picker}
+            >
+              <Picker.Item label="cm" value="cm" />
+              <Picker.Item label="ft/in" value="ftin" />
+            </Picker>
+          </View>
         </View>
       );
     }
 
-    if (key === "What is your Gender?") return renderGenderSelection();
+    const ftInOptions = [];
+    for (let ft = 3; ft <= 7; ft++) {
+      for (let inch = 0; inch <= 11; inch++) {
+        if (ft === 7 && inch > 9) break;
+        ftInOptions.push(`${ft}' ${inch}"`);
+      }
+    }
+
+    return (
+      <View style={styles.inlineRow}>
+        <View style={styles.fullPickerContainer}>
+          <Picker
+            selectedValue={userData.HeightFtIn}
+            onValueChange={(val) => handleInputChange("HeightFtIn", val)}
+            style={styles.picker}
+          >
+            {ftInOptions.map((label) => (
+              <Picker.Item key={label} label={label} value={label} />
+            ))}
+          </Picker>
+        </View>
+        <View style={styles.pickerContainerFixed}>
+          <Picker
+            selectedValue={userData.HeightUnit}
+            onValueChange={(value) => handleInputChange("HeightUnit", value)}
+            style={styles.picker}
+          >
+            <Picker.Item label="cm" value="cm" />
+            <Picker.Item label="ft/in" value="ftin" />
+          </Picker>
+        </View>
+      </View>
+    );
+  }
+
+if (key === "What is your goal?") {
+  const heightCm =
+    userData.HeightUnit === "cm"
+      ? parseFloat(userData.Height)
+      : convertFtInToCm(userData.HeightFtIn);
+
+  const weightKg =
+    userData.WeightUnit === "kg"
+      ? parseFloat(userData.Weight)
+      : parseFloat(userData.Weight) * 0.453592;
+
+  const bmi = calculateBMI(weightKg, heightCm);
+
+  let suggestedGoal = null;
+  if (bmi) {
+    if (bmi < 18.5) suggestedGoal = "Weight Gain";
+    else if (bmi >= 18.5 && bmi < 25) suggestedGoal = "Maintain my current weight";
+    else suggestedGoal = "Weight Loss";
+  }
+
+  const manualGoals = [
+    "Weight Loss",
+    "Maintain my current weight",
+    "Weight Gain",
+  ];
+
+  return (
+    <View style={{ gap: 16 }}>
+      <Text style={styles.subtitle}>
+        Based on your height and weight, we suggest the goal:{" "}
+        <Text style={{ fontWeight: "bold", color: "#14532d" }}>{suggestedGoal}</Text>
+      </Text>
+
+      <View style={styles.goalGrid}>
+        {manualGoals.map((opt) => {
+          const isDisabled =
+          !showCustomGoalOptions &&
+          opt !== suggestedGoal &&
+          opt !== "Maintain my current weight";
+
+          const isSelected = userData.Goal === opt;
+
+          return (
+            <TouchableOpacity
+              key={opt}
+              style={[
+                styles.goalBox,
+                isSelected && styles.goalBoxSelected,
+                isDisabled && { backgroundColor: "#e5e7eb", borderColor: "#d1d5db" },
+              ]}
+              onPress={() => !isDisabled && handleInputChange("Goal", opt)}
+              disabled={isDisabled}
+            >
+              <Text
+                style={[
+                  styles.goalText,
+                  isSelected && styles.goalTextSelected,
+                  isDisabled && { color: "#9ca3af" },
+                ]}
+              >
+                {opt}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {!showCustomGoalOptions && (
+       <TouchableOpacity
+          onPress={() => {
+            handleInputChange("Goal", ""); // reset selected goal
+            setShowCustomGoalOptions(true); // enable all options
+          }}
+        >
+          <Text style={{ textAlign: "center", color: "#2563eb", marginTop: 10 }}>
+            I prefer to choose my goal manually
+          </Text>
+        </TouchableOpacity>
+
+      )}
+    </View>
+  );
+}
+
+
+  if (key === "Target Weight Change") {
+    if (userData.Goal === "Maintain my current weight") {
+      return null; // Skip rendering this step entirely
+    }
+    let prompt = "What's your target weight?";
+    if (userData.Goal === "Weight Loss") {
+      prompt = "Let’s set your target weight for your weight loss goal";
+    } else if (userData.Goal === "Weight Gain") {
+      prompt = "Let’s set your target weight for your gain journey.";
+    }
+
+    return (
+      <>
+        <Text style={styles.subtitle}>{prompt}</Text>
+        <View style={styles.inlineRow}>
+          <TextInput
+            placeholder="Weight"
+            value={userData.TargetKg}
+            onChangeText={(text) =>
+              handleInputChange("TargetKg", text.replace(/[^0-9.]/g, ""))
+            }
+            style={styles.targetInput}
+            keyboardType="numeric"
+            placeholderTextColor="#9ca3af"
+          />
+          <View style={styles.targetPickerContainer}>
+            <Picker
+              selectedValue={userData.TargetKgUnit || "kg"}
+              onValueChange={(value) =>
+                handleInputChange("TargetKgUnit", value)
+              }
+              style={styles.picker}
+            >
+              <Picker.Item label="kg" value="kg" />
+              <Picker.Item label="lb" value="lb" />
+            </Picker>
+          </View>
+        </View>
+      </>
+    );
+  }
+
 
     if (key === "What is your Activity level?") {
       const activityOptions = [
@@ -383,277 +733,143 @@ const handleNext = () => {
       );
     }
 
-    if (key === "What is your goal?") {
-      const goals = [
-        "Weight Loss",
-        "Maintain my current weight",
-        "Weight Gain",
-      ];
+if (key === "Do you have any health conditions?") {
+  const options = [
+    "Diabetes",
+    "Hypertension",
+    "Heart Disease",
+    "Kidney Disease",
+    "Thyroid Disorder",
+    "Allergies",
+    "None",
+    "Others",
+  ];
 
-      return (
-        <>
-        <View style={styles.goalGrid}>
-          {goals.map((opt) => (
-            <TouchableOpacity
-              key={opt}
-              style={[
-                styles.goalBox,
-                userData.Goal === opt && styles.goalBoxSelected,
-              ]}
-              onPress={() => handleInputChange("Goal", opt)}
-            >
-              <Text
-                style={[
-                  styles.goalText,
-                  userData.Goal === opt && styles.goalTextSelected,
-                ]}
-              >
-                {opt}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        </>
-      );
-    }
-
-    if (key === "Target Weight Change") {
-      let prompt = "What's your target weight?";
-    if (userData.Goal === "Weight Loss") {
-      prompt = "Let’s set your target weight for your weight loss goal";
-    } else if (userData.Goal === "Weight Gain") {
-      prompt = "Let’s set your target weight for your gain journey.";
-    }
+  const hasCondition = (cond) => userData.HealthConditions.includes(cond);
 
   return (
-    <>
-      <Text style={styles.subtitle}>{prompt}</Text>
-      <View style={styles.inlineRow}>
-       <TextInput
-          placeholder="Weight"
-          value={userData.TargetKg}
-          onChangeText={(text) =>
-            handleInputChange("TargetKg", text.replace(/[^0-9.]/g, ""))
-          }
-          style={styles.targetInput}
-          keyboardType="numeric"
-          placeholderTextColor="#9ca3af"
-        />
-        <View style={styles.targetPickerContainer}>
-          <Picker
-            selectedValue={userData.TargetKgUnit || "kg"}
-            onValueChange={(value) => handleInputChange("TargetKgUnit", value)}
-            style={styles.picker}
+    <View style={{ marginBottom: 20 }}>
+      {options.map((condition) => {
+        const isChecked = hasCondition(condition);
+        return (
+          <TouchableOpacity
+            key={condition}
+            style={styles.checkboxRow}
+            onPress={() => toggleHealthCondition(condition)}
           >
-            <Picker.Item label="kg" value="kg" />
-            <Picker.Item label="lb" value="lb" />
-          </Picker>
-        </View>
-      </View>
-    </>
+            <View style={[styles.checkbox, isChecked && styles.checkedBox]}>
+              {isChecked && (
+                <Ionicons name="checkmark" size={14} color="#fff" />
+              )}
+            </View>
+            <Text style={styles.checkboxLabel}>{condition}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
   );
 }
 
-    if (key === "Weight") {
-      return (
-        <>
-        <View style={styles.inlineRow}>
-          <TextInput
-            placeholder="Weight"
-            value={userData.Weight}
-            onChangeText={(text) =>
-              handleInputChange("Weight", text.replace(/[^0-9.]/g, ""))
-            }
-            style={styles.weightInput}
-            keyboardType="numeric"
-            placeholderTextColor="#9ca3af"
-          />
 
-          <View style={styles.pickerContainer}>
-            <Picker
-              selectedValue={userData.WeightUnit}
-              onValueChange={(value) => handleInputChange("WeightUnit", value)}
-              style={styles.picker}
-            >
-              <Picker.Item label="kg" value="kg" />
-              <Picker.Item label="lb" value="lb" />
-            </Picker>
-          </View>
-        </View>
-        </>
-      );
-    }
-
-    if (key === "Height") {
-      if (userData.HeightUnit === "cm") {
-        return (
-          <>
-          <View style={styles.inlineRow}>
-            <TextInput
-              placeholder="Height"
-              value={userData.Height}
-              onChangeText={(text) =>
-                handleInputChange("Height", text.replace(/[^0-9.]/g, ""))
-              }
-              style={styles.smallInput}
-              keyboardType="numeric"
-              placeholderTextColor="#9ca3af"
-            />
-
-            <View style={styles.pickerContainerFixed}>
-              <Picker
-                selectedValue={userData.HeightUnit}
-                onValueChange={(value) =>
-                  handleInputChange("HeightUnit", value)
-                }
-                style={styles.picker}
-              >
-                <Picker.Item label="cm" value="cm" />
-                <Picker.Item label="ft/in" value="ftin" />
-              </Picker>
-            </View>
-          </View>
-          </>
-        );
-      }
-
-      const ftInOptions = [];
-      for (let ft = 3; ft <= 7; ft++) {
-        for (let inch = 0; inch <= 11; inch++) {
-          if (ft === 7 && inch > 9) break;
-          ftInOptions.push(`${ft}' ${inch}"`);
-        }
-      }
-
-      return (
-        <>
-        <View style={styles.inlineRow}>
-          <View style={styles.fullPickerContainer}>
-            <Picker
-              selectedValue={userData.HeightFtIn}
-              onValueChange={(val) => handleInputChange("HeightFtIn", val)}
-              style={styles.picker}
-            >
-              {ftInOptions.map((label) => (
-                <Picker.Item key={label} label={label} value={label} />
-              ))}
-            </Picker>
-          </View>
-
-          <View style={styles.pickerContainerFixed}>
-            <Picker
-              selectedValue={userData.HeightUnit}
-              onValueChange={(value) =>
-                handleInputChange("HeightUnit", value)
-              }
-              style={styles.picker}
-            >
-              <Picker.Item label="cm" value="cm" />
-              <Picker.Item label="ft/in" value="ftin" />
-            </Picker>
-          </View>
-        </View>
-        </>
-      );
-    }
-
-    if (key === "When is your Birthday?") {
-      return (
-        <>
-          <TouchableOpacity
-            style={styles.input}
-            onPress={() => setShowDatePicker(true)}
-          >
-            <Text style={{ color: userData.Birthday ? "#111827" : "#9ca3af" }}>
-              {userData.Birthday
-                ? new Date(userData.Birthday).toLocaleDateString("en-US", {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  })
-                : "Select your birthday"}
-            </Text>
-          </TouchableOpacity>
-          {showDatePicker && (
-            <DateTimePicker
-              value={
-                userData.Birthday
-                  ? new Date(userData.Birthday)
-                  : new Date("2000-01-01")
-              }
-              mode="date"
-              display={Platform.OS === "ios" ? "spinner" : "default"}
-              maximumDate={new Date()}
-              onChange={(event, selectedDate) => {
-                setShowDatePicker(Platform.OS === "ios");
-                if (selectedDate) {
-                  const dateOnly = selectedDate.toISOString().split("T")[0];
-                  handleInputChange("Birthday", dateOnly);
-                }
-              }}
-            />
-          )}
-        </>
-      );
-    }
-
-    let fieldKey = key;
-    let placeholder = key;
-
-    if (key === "Let’s start with your name.") {
-      fieldKey = "Name";
-      placeholder = "Enter your name here";
-    }
-
-    return (
+if (derivedSteps[currentStep] === "Allergy Details") {
+  return (
+    <View>
+      <Text style={styles.subtitle}>Tell us more about your allergies</Text>
+      
       <TextInput
-        placeholder={placeholder}
-        value={userData[fieldKey]}
-        onChangeText={(text) => handleInputChange(fieldKey, text)}
+        placeholder="Which foods or items are you allergic to?"
+        value={userData.AllergyDetails || ""}
+        onChangeText={(text) => handleInputChange("AllergyDetails", text)}
         style={styles.input}
         placeholderTextColor="#9ca3af"
       />
+
+      <TextInput
+        placeholder="Are you taking medications for your allergy?"
+        value={userData.AllergyMedications || ""}
+        onChangeText={(text) => handleInputChange("AllergyMedications", text)}
+        style={styles.input}
+        placeholderTextColor="#9ca3af"
+      />
+    </View>
+  );
+}
+
+
+
+  if (key === "When is your Birthday?") {
+    return (
+      <>
+        <TouchableOpacity
+          style={styles.input}
+          onPress={() => setShowDatePicker(true)}
+        >
+          <Text style={{ color: userData.Birthday ? "#111827" : "#9ca3af" }}>
+            {userData.Birthday
+              ? new Date(userData.Birthday).toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })
+              : "Select your birthday"}
+          </Text>
+        </TouchableOpacity>
+        {showDatePicker && (
+          <DateTimePicker
+            value={
+              userData.Birthday
+                ? new Date(userData.Birthday)
+                : new Date("2000-01-01")
+            }
+            mode="date"
+            display={Platform.OS === "ios" ? "spinner" : "default"}
+            maximumDate={new Date()}
+            onChange={(event, selectedDate) => {
+              setShowDatePicker(Platform.OS === "ios");
+              if (selectedDate) {
+                const dateOnly = selectedDate.toISOString().split("T")[0];
+                handleInputChange("Birthday", dateOnly);
+              }
+            }}
+          />
+        )}
+      </>
     );
+  }
 
-  };
+  return (
+    <TextInput
+      placeholder={`Enter your ${key}`}
+      value={userData[key]}
+      onChangeText={(text) => handleInputChange(key, text)}
+      style={styles.input}
+      placeholderTextColor="#9ca3af"
+    />
+  );
+};
 
-  const progress = ((currentStep + 1) / steps.length) * 100;
 
   return (
     <>
       <Modal visible={modalVisible} transparent animationType="none">
-  <View style={styles.modalOverlay}>
-    <Animated.View
-      style={[
-        styles.modalContent,
-        {
-          transform: [{ scale: scaleAnim }],
-          opacity: opacityAnim,
-        },
-      ]}
-    >
-      <Text style={styles.title}>Before you get started</Text>
-      <Text style={styles.consentText}>
-        We collect your information (age, height, weight, etc.) solely for
-        the purpose of calculating your personalized calorie and nutrition
-        goals. Your data is stored securely and never shared with third
-        parties.
-      </Text>
-      <View style={styles.consentButtons}>
-        <TouchableOpacity style={styles.agreeButton} onPress={handleAgree}>
-          <Text style={styles.agreeText}>Agree</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.disagreeButton}
-          onPress={handleDisagree}
-        >
-          <Text style={styles.disagreeText}>Not agree</Text>
-        </TouchableOpacity>
-      </View>
-    </Animated.View>
-  </View>
-</Modal>
-
+        <View style={styles.modalOverlay}>
+          <Animated.View style={[styles.modalContent, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
+            <Text style={styles.title}>Before you get started</Text>
+            <Text style={styles.consentText}>
+              We collect your information (age, height, weight, etc.) solely for the purpose of calculating your
+              personalized calorie and nutrition goals.
+            </Text>
+            <View style={styles.consentButtons}>
+              <TouchableOpacity style={styles.agreeButton} onPress={handleAgree}>
+                <Text style={styles.agreeText}>Agree</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.disagreeButton} onPress={handleDisagree}>
+                <Text style={styles.disagreeText}>Not agree</Text>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
 
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.topRow}>
@@ -666,19 +882,7 @@ const handleNext = () => {
           )}
         </View>
 
-        <View style={styles.progressBarBackground}>
-          <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
-        </View>
-
         <Text style={styles.stepTitle}>{steps[currentStep]}</Text>
-
-        {steps[currentStep] === "Let’s start with your name." && (
-          <Text style={styles.subtitle}>
-            Hi! We'd like to get to know you to make the NutriFit app
-            personalized to you.
-          </Text>
-        )}
-
         {renderStep()}
 
         <TouchableOpacity
@@ -686,72 +890,53 @@ const handleNext = () => {
           onPress={handleNext}
           disabled={!isCurrentStepValid}
         >
-          <Text style={styles.buttonText}>
-            {currentStep === steps.length - 1 ? "Finish" : "Next"}
-          </Text>
+          <Text style={styles.buttonText}>{currentStep === steps.length - 1 ? "Finish" : "Next"}</Text>
         </TouchableOpacity>
-
       </ScrollView>
 
-<Modal visible={isAuthPromptVisible} transparent animationType="none">
-  <View style={styles.authModalOverlay}>
-    <Animated.View
-      style={[
-        styles.authModalContent,
-        {
-          transform: [{ scale: scaleAnim }],
-          opacity: opacityAnim,
-        },
-      ]}
-    >
-      <Text style={styles.authTitle}>Create your NutriFit account</Text>
-      <Text style={styles.authText}>
-        Sign up to save your progress and start tracking your calories.
-      </Text>
+      <Modal visible={isAuthPromptVisible} transparent animationType="none">
+        <View style={styles.authModalOverlay}>
+          <Animated.View style={[styles.authModalContent, { transform: [{ scale: scaleAnim }], opacity: opacityAnim }]}>
+            <Text style={styles.authTitle}>Create your NutriFit account</Text>
+            <Text style={styles.authText}>
+              Sign up to save your progress and start tracking your calories.
+            </Text>
 
-      <TouchableOpacity
-        style={[styles.authGreenButton, { marginBottom: 20 }]}
-        onPress={() => {
-          setAuthPromptVisible(false);
-          navigation.navigate("SignUpWithEmail", { userData });
-        }}
-      >
-        <View style={styles.googleRow}>
-          <Ionicons
-            name="mail-outline"
-            size={20}
-            color="#fff"
-            style={{ marginRight: 8 }}
-          />
-          <Text style={styles.authGreenButtonText}>Sign up with Email</Text>
+            <TouchableOpacity
+              style={[styles.authGreenButton, { marginBottom: 20 }]}
+              onPress={() => {
+                setAuthPromptVisible(false);
+                navigation.navigate("SignUpWithEmail", { userData });
+              }}
+            >
+              <View style={styles.googleRow}>
+                <Ionicons name="mail-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
+                <Text style={styles.authGreenButtonText}>Sign up with Email</Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.authGoogleButton}
+              onPress={() => {
+                setAuthPromptVisible(false);
+                navigation.navigate("GoogleSignIn", { userData });
+              }}
+            >
+              <View style={styles.googleRow}>
+                <Image
+                  source={require("../../../assets/googlelogo.png")}
+                  style={[styles.googleLogo, { marginRight: 8 }]}
+                />
+                <Text style={styles.disagreeText}>Continue with Google</Text>
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
         </View>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.authGoogleButton}
-        onPress={() => {
-          setAuthPromptVisible(false);
-          navigation.navigate("GoogleSignIn", { userData });
-        }}
-      >
-        <View style={styles.googleRow}>
-          <Image
-            source={require("../../../assets/googlelogo.png")}
-            style={[styles.googleLogo, { marginRight: 8 }]}
-          />
-          <Text style={styles.disagreeText}>Continue with Google</Text>
-        </View>
-      </TouchableOpacity>
-    </Animated.View>
-  </View>
-</Modal>
-
-
-
+      </Modal>
     </>
   );
-  
 }
+
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
@@ -1156,6 +1341,42 @@ targetPickerContainer: {
   width: 100,
   height: 60,
   justifyContent: "center",
+},
+checkboxRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  marginBottom: 12,
+},
+
+checkbox: {
+  width: 20,
+  height: 20,
+  borderRadius: 4,
+  borderWidth: 1,
+  borderColor: "#9ca3af",
+  justifyContent: "center",
+  alignItems: "center",
+  marginRight: 12,
+  backgroundColor: "#fff",
+},
+
+checkedBox: {
+  backgroundColor: "#22c55e",
+  borderColor: "#22c55e",
+},
+
+checkboxLabel: {
+  fontSize: 16,
+  color: "#374151",
+},
+
+underlineInput: {
+  borderBottomWidth: 1,
+  borderColor: "#d1d5db",
+  fontSize: 16,
+  color: "#111827",
+  paddingVertical: 6,
+  marginTop: 10,
 },
 
 });
