@@ -208,7 +208,7 @@ useEffect(() => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         const tdeeValue = data?.calorieBreakdown?.tdee;
-        setUserName(data.Name || "User");
+        setUserName(data.firstName || "User");
         setTdee(tdeeValue ?? 2000);
         setMealsLoading(true);
       }

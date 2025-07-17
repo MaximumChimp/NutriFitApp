@@ -32,6 +32,7 @@ const { width } = Dimensions.get("window");
     "What is your Activity level?",
     "Do you have any health conditions?",
     "Allergy Details",
+    "Medications",
     "When is your Birthday?",
   ];
 
@@ -63,26 +64,32 @@ export default function OnboardingScreen({ navigation }) {
   const [isCurrentStepValid, setIsCurrentStepValid] = useState(false);
   const [isAuthPromptVisible, setAuthPromptVisible] = useState(false);
   const [showCustomGoalOptions, setShowCustomGoalOptions] = useState(false);
-  const [userData, setUserData] = useState({
-    firstName: "",
-    lastName: "",
-    Age: "",
-    Goal: "",
-    Gender: "",
-    Birthday: "",
-    Height: "",
-    HeightFtIn: "3' 0\"",
-    HeightUnit: "cm",
-    Weight: "",
-    WeightUnit: "kg",
-    Activity: "",
-    TargetKg: "",
-    TargetKgUnit: "kg",
-    HealthConditions: [],
-    OtherHealthCondition: "",
-    AllergyDetails: "",
-    Medications: "",
-  });
+const [userData, setUserData] = useState({
+  firstName: "",
+  lastName: "",
+  Age: "",
+  Goal: "",
+  Gender: "",
+  Birthday: "",
+  Height: "",
+  Weight: "",
+  WeightUnit: "kg",
+  HeightUnit: "cm",
+  HeightFtIn: "",
+  TargetKg: "",
+  TargetKgUnit: "kg",
+  Activity: "",
+  HealthConditions: [],
+  OtherHealthCondition: "",
+  AllergyDetails: "",
+  AllergyMedications: "",
+  Allergies: [],            // <-- Add this line
+  OtherAllergy: "",         // <-- And this
+  Medications: [],
+  OtherMedication: "",
+});
+
+
 
   const derivedSteps = [...steps];
 if (
@@ -139,24 +146,53 @@ if (
 };
 
 
+const toggleMedication = (medication) => {
+  const current = userData.Medications;
+  if (current.includes(medication)) {
+    setUserData({
+      ...userData,
+      Medications: current.filter((m) => m !== medication),
+    });
+  } else {
+    // Remove "None" if adding another item
+    const newSelection = medication === "None" ? ["None"] : current.filter((m) => m !== "None").concat(medication);
+    setUserData({
+      ...userData,
+      Medications: newSelection,
+    });
+  }
+};
+
+
   const handleInputChange = (key, value) => {
     setUserData((prev) => ({ ...prev, [key]: value }));
   };
 
-  const toggleHealthCondition = (condition) => {
-    const current = userData.HealthConditions;
+const toggleHealthCondition = (condition) => {
+  const current = userData.HealthConditions;
+  let updated = [...current];
+
+  if (condition === "None") {
+    // If selecting None: clear all others
+    updated = current.includes("None") ? [] : ["None"];
+  } else {
+    // Remove "None" if another condition is selected
+    updated = updated.filter((c) => c !== "None");
+
     if (current.includes(condition)) {
-      setUserData({
-        ...userData,
-        HealthConditions: current.filter((c) => c !== condition),
-      });
+      // Deselect condition
+      updated = updated.filter((c) => c !== condition);
     } else {
-      setUserData({
-        ...userData,
-        HealthConditions: [...current, condition],
-      });
+      updated.push(condition);
     }
-  };
+  }
+
+  setUserData({
+    ...userData,
+    HealthConditions: updated,
+  });
+};
+
 
   useEffect(() => {
     const valid = validateStep(false);
@@ -164,7 +200,7 @@ if (
   }, [userData, currentStep]);
 
 const validateStep = (showAlerts = true) => {
-  const key = steps[currentStep];
+  const key = derivedSteps[currentStep];
 
   if (key === steps[0] && (!userData.firstName || userData.firstName.trim().length < 2)) {
     showAlerts && Alert.alert("Enter your first name.");
@@ -237,7 +273,7 @@ const validateStep = (showAlerts = true) => {
   }
 
   if (key === steps[8]) {
-    const selected = userData.HealthConditions;
+    const selected = userData.HealthConditions || [];
     if (!selected.length || (selected.includes("None") && selected.length > 1)) {
       showAlerts && Alert.alert("Choose one or 'None'.");
       return false;
@@ -248,7 +284,31 @@ const validateStep = (showAlerts = true) => {
     }
   }
 
-  if (key === steps[9] && !userData.Birthday) {
+  if (key === "Allergy Details") {
+    const selected = userData.Allergies || [];
+    if (!selected.length || (selected.includes("None") && selected.length > 1)) {
+      showAlerts && Alert.alert("Choose one or 'None'.");
+      return false;
+    }
+    if (selected.includes("Others") && !userData.OtherAllergy?.trim()) {
+      showAlerts && Alert.alert("Specify other allergy.");
+      return false;
+    }
+  }
+
+  if (key === "Medications") {
+    const selected = userData.Medications || [];
+    if (!selected.length || (selected.includes("None") && selected.length > 1)) {
+      showAlerts && Alert.alert("Choose one or 'None'.");
+      return false;
+    }
+    if (selected.includes("Others") && !userData.OtherMedication?.trim()) {
+      showAlerts && Alert.alert("Specify other medication.");
+      return false;
+    }
+  }
+
+  if (key === "Birthday" && !userData.Birthday) {
     showAlerts && Alert.alert("Select your birthday.");
     return false;
   }
@@ -258,12 +318,14 @@ const validateStep = (showAlerts = true) => {
 
 
 
+
 const handleNext = () => {
   if (!validateStep(true)) return;
 
-  const key = steps[currentStep];
+  const key = derivedSteps[currentStep];
+  const nextKey = steps[currentStep + 1];
 
-  // --- Goal step confirmation ---
+  // ✅ BMI Goal Alert Logic
   if (key === "What is your goal?") {
     const heightCm =
       userData.HeightUnit === "cm"
@@ -297,7 +359,7 @@ const handleNext = () => {
             text: "Continue",
             onPress: () => {
               if (userData.Goal === "Maintain my current weight") {
-                setCurrentStep((prev) => prev + 2); // skip target weight
+                setCurrentStep((prev) => prev + 2); // Skip target weight
               } else {
                 setCurrentStep((prev) => prev + 1);
               }
@@ -307,34 +369,40 @@ const handleNext = () => {
       );
       return;
     }
+
+    // If not showing alert and goal is maintain, skip next step
+    if (userData.Goal === "Maintain my current weight") {
+      setCurrentStep((prev) => prev + 2);
+      return;
+    }
   }
 
-  // --- Skip Target Weight Change if goal is Maintain ---
-  if (key === "What is your goal?" && userData.Goal === "Maintain my current weight") {
-    setCurrentStep((prev) => prev + 2); // Skip Target Weight Change
-    return;
+  // ✅ Skip "Allergy Details" if "Allergies" not selected
+  if (key === "Do you have any health conditions?") {
+    const hasAllergies = userData.HealthConditions.includes("Allergies");
+    const nextStep = steps[currentStep + 1];
+    if (!hasAllergies && nextStep === "Allergy Details") {
+      setCurrentStep((prev) => prev + 2); // Skip Allergy Details
+      return;
+    }
   }
 
-  // --- Allergy handling: inject Allergy step only if Allergies is selected ---
-  const currentStepKey = steps[currentStep];
-  const nextStepKey = steps[currentStep + 1];
-
-  if (
-    currentStepKey === "Do you have any health conditions?" &&
-    userData.HealthConditions.includes("Allergies")
-  ) {
-    // Inject "Allergy Details" after health conditions
-    setCurrentStep((prev) => prev + 1);
-    return;
-  }
-
-  // --- If current step is Allergy Details, go to Birthday ---
+  // ✅ Allergy step validation
   if (key === "Allergy Details") {
-    setCurrentStep(steps.indexOf("When is your Birthday?"));
-    return;
+    const selected = userData.Allergies || [];
+
+    if (selected.length === 0) {
+      Alert.alert("Please select at least one allergy.");
+      return;
+    }
+
+    if (selected.includes("Others") && !userData.OtherAllergy?.trim()) {
+      Alert.alert("Please specify your allergy under 'Others'.");
+      return;
+    }
   }
 
-  // --- Normal step forward ---
+  // ✅ Final step: submit and set age, height
   if (currentStep < steps.length - 1) {
     setCurrentStep((prev) => prev + 1);
   } else {
@@ -357,44 +425,49 @@ const handleNext = () => {
 };
 
 
-const handleBack = () => {
-  let prev = currentStep;
 
-  // If we're at Target Weight Change AND the goal is "Maintain", skip 2 steps back to "What is your goal?"
-  if (steps[currentStep] === "Target Weight Change" && userData.Goal === "Maintain my current weight") {
-    prev = currentStep - 2;
-    setCurrentStep(prev);
+
+
+const handleBack = () => {
+  if (currentStep === 0) return;
+
+  const key = derivedSteps[currentStep];
+  const prevKey = steps[currentStep - 1];
+
+  // If user is at Allergy Details but doesn't have allergies, skip back
+  if (key === "Allergy Details" && !userData.HealthConditions.includes("Allergies")) {
+    setCurrentStep((prev) => prev - 2);
+    return;
   }
-  // If we're at the step *after* Target Weight Change (like Birthday), and skipped Target step earlier
-  else if (
-    steps[currentStep - 1] === "Target Weight Change" &&
+
+  // If previous step is Allergy Details and user doesn't have allergies, skip it
+  if (prevKey === "Allergy Details" && !userData.HealthConditions.includes("Allergies")) {
+    setCurrentStep((prev) => prev - 2);
+    return;
+  }
+
+  // If coming back from skipping "Target Weight" when goal is Maintain
+  if (
+    key === "Target Weight" &&
     userData.Goal === "Maintain my current weight"
   ) {
-    prev = currentStep - 2;
-    setCurrentStep(prev);
-  }
-  else if (currentStep > 0) {
-    prev = currentStep - 1;
-    setCurrentStep(prev);
+    setCurrentStep((prev) => prev - 2);
+    return;
   }
 
-  setTimeout(() => {
-    if (steps[prev] === "What is your goal?") {
-      setShowCustomGoalOptions(false);
-    }
-  }, 50);
+  setCurrentStep((prev) => prev - 1);
 };
 
 
 
 useEffect(() => {
-  const key = steps[currentStep];
+  const key = derivedSteps[currentStep];
   if (key === "What is your goal?") {
     setShowCustomGoalOptions(false);
   }
 }, [currentStep]);
 const renderStep = () => {
-  const key = steps[currentStep];
+  const key = derivedSteps[currentStep];
 
   if (key === "Let’s start with your name.") {
     return (
@@ -766,36 +839,150 @@ if (key === "Do you have any health conditions?") {
           </TouchableOpacity>
         );
       })}
+
+      {/* Show input if "Others" is selected */}
+      {hasCondition("Others") && (
+        <TextInput
+          placeholder="Please specify"
+          value={userData.OtherHealthCondition || ""}
+          onChangeText={(text) =>
+            setUserData((prev) => ({
+              ...prev,
+              OtherHealthCondition: text,
+            }))
+          }
+           style={{
+              borderBottomWidth: 1,
+              borderBottomColor: "#ccc",
+              marginTop: 10,
+              paddingVertical: 6,
+              fontSize: 16,
+              color: "#000",
+            }}
+          placeholderTextColor="#aaa"
+        />
+      )}
+    </View>
+  );
+}
+
+
+if (key === "Medications") {
+  const medicationOptions = [
+    "Aspirin",
+    "Metformin",
+    "Lisinopril",
+    "Statins",
+    "Insulin",
+    "None",
+    "Others",
+  ];
+
+  const hasMedication = (med) => userData.Medications.includes(med);
+
+  return (
+    <View>
+      <Text style={styles.subtitle}>Select any medications you are currently taking:</Text>
+      {medicationOptions.map((med) => (
+        <TouchableOpacity
+          key={med}
+          style={styles.checkboxRow}
+          onPress={() => toggleMedication(med)}
+        >
+          <View style={[styles.checkbox, hasMedication(med) && styles.checkedBox]}>
+            {hasMedication(med) && (
+              <Ionicons name="checkmark" size={14} color="#fff" />
+            )}
+          </View>
+          <Text style={styles.checkboxLabel}>{med}</Text>
+        </TouchableOpacity>
+      ))}
+      {userData.Medications.includes("Others") && (
+        <TextInput
+          placeholder="Please specify other medications"
+          value={userData.OtherMedication}
+          onChangeText={(text) => handleInputChange("OtherMedication", text)}
+          style={[styles.inputUnderlineOnly]}
+          placeholderTextColor="#9ca3af"
+        />
+
+      )}
     </View>
   );
 }
 
 
 if (derivedSteps[currentStep] === "Allergy Details") {
+  const allergyOptions = [
+    "Peanuts",
+    "Shellfish",
+    "Shrimp",
+    "Chocolates",
+    "Eggs",
+    "Milk",
+    "Wheat",
+    "Soy",
+    "Others",
+  ];
+
+  const hasAllergy = (item) => userData.Allergies?.includes(item);
+
+  const toggleAllergy = (item) => {
+    let updated = userData.Allergies || [];
+
+    if (updated.includes(item)) {
+      updated = updated.filter((a) => a !== item);
+    } else {
+      updated.push(item);
+    }
+
+    setUserData((prev) => ({ ...prev, Allergies: updated }));
+  };
+
   return (
     <View>
       <Text style={styles.subtitle}>Tell us more about your allergies</Text>
-      
-      <TextInput
-        placeholder="Which foods or items are you allergic to?"
-        value={userData.AllergyDetails || ""}
-        onChangeText={(text) => handleInputChange("AllergyDetails", text)}
-        style={styles.input}
-        placeholderTextColor="#9ca3af"
-      />
 
-      <TextInput
-        placeholder="Are you taking medications for your allergy?"
-        value={userData.AllergyMedications || ""}
-        onChangeText={(text) => handleInputChange("AllergyMedications", text)}
-        style={styles.input}
-        placeholderTextColor="#9ca3af"
-      />
+      {/* Allergy Checkbox List */}
+      {allergyOptions.map((item) => {
+        const checked = hasAllergy(item);
+        return (
+          <TouchableOpacity
+            key={item}
+            style={styles.checkboxRow}
+            onPress={() => toggleAllergy(item)}
+          >
+            <View style={[styles.checkbox, checked && styles.checkedBox]}>
+              {checked && <Ionicons name="checkmark" size={14} color="#fff" />}
+            </View>
+            <Text style={styles.checkboxLabel}>{item}</Text>
+          </TouchableOpacity>
+        );
+      })}
+
+      {/* Show "Other" allergy text input */}
+      {hasAllergy("Others") && (
+        <TextInput
+          placeholder="Please specify your allergy"
+          value={userData.OtherAllergy || ""}
+          onChangeText={(text) =>
+            setUserData((prev) => ({ ...prev, OtherAllergy: text }))
+          }
+          style={{
+            borderBottomWidth: 1,
+            borderBottomColor: "#ccc",
+            marginTop: 10,
+            paddingVertical: 6,
+            fontSize: 16,
+            color: "#000",
+          }}
+          placeholderTextColor="#aaa"
+        />
+      )}
+
     </View>
   );
 }
-
-
 
   if (key === "When is your Birthday?") {
     return (
@@ -1377,6 +1564,15 @@ underlineInput: {
   color: "#111827",
   paddingVertical: 6,
   marginTop: 10,
+},
+inputUnderlineOnly: {
+  borderBottomWidth: 1,
+  borderColor: "#ccc",
+  paddingVertical: 8,
+  paddingHorizontal: 4,
+  marginTop: 10,
+  fontSize: 16,
+  color: "#000",
 },
 
 });

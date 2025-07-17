@@ -140,7 +140,22 @@ export default function SignUpWithEmail({ route, navigation }) {
     return isValid;
   };
 
-  const handleSignup = async () => {
+  function calculateAge(birthday) {
+  if (!birthday) return 0;
+  const birthDate = new Date(birthday);
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+
+  return age;
+}
+
+
+const handleSignup = async () => {
   if (!validateForm()) return;
 
   setLoading(true);
@@ -148,15 +163,45 @@ export default function SignUpWithEmail({ route, navigation }) {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const { uid } = userCredential.user;
 
+    // Convert height if needed
+    let finalHeight = userData.Height;
+    if (userData.HeightUnit === "ftin") {
+      finalHeight = convertFtInToCm(userData.HeightFtIn);
+    }
+
+    const parsedWeight =
+      userData.WeightUnit === "lb"
+        ? parseFloat(userData.Weight) * 0.453592
+        : parseFloat(userData.Weight);
+
+    const parsedTarget =
+      userData.TargetKgUnit === "lb"
+        ? parseFloat(userData.TargetKg) * 0.453592
+        : parseFloat(userData.TargetKg);
+
+    const age = calculateAge(userData.Birthday);
+
     const cleanedUserData = {
-      Name:userData.Name,
+      firstName: userData.firstName,
+      lastName: userData.lastName,
       Gender: userData.Gender,
-      Age: parseInt(userData.Age || "0"),
-      Goal: userData.Goal, 
-      Height: parseFloat(userData.Height || "0"),
-      Weight: parseFloat(userData.Weight || "0"),
-      TargetKg: parseFloat(userData.TargetKg || "0"),
+      Age: age,
+      Birthday: userData.Birthday,
+      Goal: userData.Goal,
+      Height: parseFloat(finalHeight || "0"),
+      HeightUnit: "cm",
+      HeightFtIn: userData.HeightFtIn || "",
+      Weight: parsedWeight,
+      WeightUnit: "kg",
+      TargetKg: parsedTarget,
+      TargetKgUnit: "kg",
       Activity: userData.Activity,
+      HealthConditions: userData.HealthConditions,
+      OtherHealthCondition: userData.OtherHealthCondition || "",
+      Allergies: userData.Allergies || [],
+      OtherAllergy: userData.OtherAllergy || "",
+      Medications: userData.Medications || [],
+      OtherMedication: userData.OtherMedication || "",
     };
 
     const { requiredCalories, breakdown } = calculateCalories(cleanedUserData);
@@ -169,12 +214,11 @@ export default function SignUpWithEmail({ route, navigation }) {
       calorieBreakdown: breakdown,
       createdAt: new Date(),
     });
-    navigation.replace("MainTabs");
 
+    navigation.replace("MainTabs");
   } catch (error) {
     console.error("Signup error:", error);
 
-    // 🛡️ Delete auth user if Firestore or other logic fails
     if (auth.currentUser) {
       try {
         await auth.currentUser.delete();
@@ -193,6 +237,8 @@ export default function SignUpWithEmail({ route, navigation }) {
     setLoading(false);
   }
 };
+
+
 
 
   return (
