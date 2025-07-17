@@ -64,6 +64,8 @@ export default function OnboardingScreen({ navigation }) {
   const [isCurrentStepValid, setIsCurrentStepValid] = useState(false);
   const [isAuthPromptVisible, setAuthPromptVisible] = useState(false);
   const [showCustomGoalOptions, setShowCustomGoalOptions] = useState(false);
+  const [showHealthWarning, setShowHealthWarning] = useState(false);
+
 const [userData, setUserData] = useState({
   firstName: "",
   lastName: "",
@@ -378,14 +380,25 @@ const handleNext = () => {
   }
 
   // ✅ Skip "Allergy Details" if "Allergies" not selected
-  if (key === "Do you have any health conditions?") {
-    const hasAllergies = userData.HealthConditions.includes("Allergies");
-    const nextStep = steps[currentStep + 1];
-    if (!hasAllergies && nextStep === "Allergy Details") {
-      setCurrentStep((prev) => prev + 2); // Skip Allergy Details
-      return;
-    }
+if (key === "Do you have any health conditions?") {
+  const selectedConditions = userData.HealthConditions.filter(
+    (c) => c !== "None"
+  );
+  
+  // Show modal if 2+ conditions selected
+  if (selectedConditions.length >= 2) {
+    setShowHealthWarning(true);
+    return;
   }
+
+  // Handle Allergy skip
+  const hasAllergies = userData.HealthConditions.includes("Allergies");
+  const nextStep = steps[currentStep + 1];
+  if (!hasAllergies && nextStep === "Allergy Details") {
+    setCurrentStep((prev) => prev + 2);
+    return;
+  }
+}
 
   // ✅ Allergy step validation
   if (key === "Allergy Details") {
@@ -1120,6 +1133,56 @@ if (derivedSteps[currentStep] === "Allergy Details") {
           </Animated.View>
         </View>
       </Modal>
+<Modal
+  animationType="slide"
+  transparent={true}
+  visible={showHealthWarning}
+  onRequestClose={() => setShowHealthWarning(false)}
+>
+  <View className="flex-1 justify-center items-center bg-black/50 px-4">
+    <View className="bg-white rounded-2xl p-6 w-full max-w-md shadow-lg items-center">
+      
+      {/* Warning Icon */}
+      <View className="p-2">
+        <Ionicons name="warning" size={40} color="#facc15" />
+      </View>
+
+      <Text className="text-lg font-semibold text-center mb-2">
+        Health Warning
+      </Text>
+
+      <Text className="text-base text-gray-700 mb-6 text-center">
+        You've selected multiple health conditions. For your safety, we strongly recommend consulting a healthcare professional before making any major dietary or lifestyle changes.
+      </Text>
+
+     <TouchableOpacity
+  onPress={() => {
+    setShowHealthWarning(false);
+
+    const selectedConditions = userData.HealthConditions?.filter(
+      (c) => c !== "None"
+    ) || [];
+
+    const hasAllergies = selectedConditions.includes("Allergies");
+    const otherConditionsCount = selectedConditions.filter(
+      (c) => c !== "Allergies"
+    ).length;
+
+    const shouldSkipAllergyStep = !hasAllergies && otherConditionsCount >= 2;
+
+    setCurrentStep((prev) => prev + (shouldSkipAllergyStep ? 2 : 1));
+  }}
+  style={{ backgroundColor: '#22c55e' }}
+  className="rounded-xl py-3 px-6 self-center"
+>
+  <Text className="text-white font-semibold text-base">Continue</Text>
+</TouchableOpacity>
+
+    </View>
+  </View>
+</Modal>
+
+
     </>
   );
 }
