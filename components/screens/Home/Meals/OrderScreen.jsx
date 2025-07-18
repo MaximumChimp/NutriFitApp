@@ -26,7 +26,8 @@ import debounce from 'lodash.debounce';
 import { useNavigation, useStateForPath } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuth } from 'firebase/auth'; // <-- IMPORTANT
-
+import NetInfo from '@react-native-community/netinfo';
+import NoInternetScreen from './NoInternetScreen';
 // layout constants
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const numColumns = 2;
@@ -57,13 +58,32 @@ export default function OrderScreen() {
   const [showCartSidebar, setShowCartSidebar] = useState(false);
   const sidebarAnim = useRef(new Animated.Value(SCREEN_WIDTH)).current;
 
-  // continue your logic...
+  // connection state 
+  const [isConnected, setIsConnected] = useState(true);
 
   const navigation = useNavigation();
 
   /* ------------------------------------------------------------------
    * CART HELPERS
    * ---------------------------------------------------------------- */
+  //Check Connection
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsConnected(state.isConnected && state.isInternetReachable !== false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleRetry = () => {
+    NetInfo.fetch().then(state => {
+      setIsConnected(state.isConnected && state.isInternetReachable !== false);
+    });
+  };
+
+  if (!isConnected) {
+    return <NoInternetScreen onRetry={handleRetry} />;
+  }
 
   const getCartStorageKey = () => {
     const auth = getAuth();
