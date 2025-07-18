@@ -46,38 +46,41 @@ export default function MealsScreen() {
     return grouped;
   };
 
-  const loadLocalMeals = async () => {
-    try {
-      const key = `loggedMeals_${activeTab}`;
-      const stored = await AsyncStorage.getItem(key);
-      const meals = stored ? JSON.parse(stored) : [];
+const loadLocalMeals = async () => {
+  try {
+    const uid = auth?.currentUser?.uid;
+    if (!uid) return;
 
-      let filtered = [];
+    const key = `${uid}_loggedMeals_${activeTab}`;
+    const stored = await AsyncStorage.getItem(key);
+    const meals = stored ? JSON.parse(stored) : [];
 
-      if (viewMode === 'weekly') {
-        const [start, end] = getWeekRange(selectedDate);
-        filtered = meals.filter((m) => {
-          const createdAt = moment(m.createdAt);
-          return createdAt.isBetween(start, end, 'day', '[]');
-        });
-      } else {
-        filtered = meals.filter((m) =>
-          moment(m.createdAt).isSame(moment(selectedDate), 'day')
-        );
-      }
+    let filtered = [];
 
-      const uniqueMeals = Object.values(
-        filtered.reduce((acc, meal) => {
-          acc[meal.id] = meal;
-          return acc;
-        }, {})
+    if (viewMode === 'weekly') {
+      const [start, end] = getWeekRange(selectedDate);
+      filtered = meals.filter((m) => {
+        const createdAt = moment(m.createdAt);
+        return createdAt.isBetween(start, end, 'day', '[]'); // inclusive
+      });
+    } else {
+      filtered = meals.filter((m) =>
+        moment(m.createdAt).isSame(moment(selectedDate), 'day')
       );
-
-      setUserMeals(uniqueMeals);
-    } catch (error) {
-      console.error('Failed to load user meals:', error);
     }
-  };
+
+    const uniqueMeals = Object.values(
+      filtered.reduce((acc, meal) => {
+        acc[meal.id] = meal;
+        return acc;
+      }, {})
+    );
+
+    setUserMeals(uniqueMeals);
+  } catch (error) {
+    console.error('Failed to load user meals:', error);
+  }
+};
 
   useFocusEffect(
     React.useCallback(() => {
@@ -138,57 +141,59 @@ const handleSaveToFirebase = async () => {
   try {
     setIsSaving(true); // Start loading
 
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      Alert.alert('Not logged in', 'Please sign in to sync your meals.');
+    const uid = auth?.currentUser?.uid;
+    if (!uid) {
+      Alert.alert("Not logged in", "Please sign in to sync your meals.");
       return;
     }
 
-    const userId = currentUser.uid;
     const localMeals = [];
 
     for (const tab of tabs) {
-      const stored = await AsyncStorage.getItem(`loggedMeals_${tab}`);
+      const key = `${uid}_loggedMeals_${tab}`;
+      const stored = await AsyncStorage.getItem(key);
       if (stored) {
         const meals = JSON.parse(stored);
         meals.forEach((meal) => localMeals.push(meal));
       }
     }
 
-    const prevSyncedStr = await AsyncStorage.getItem('syncedMealIds');
+    const syncedIdsKey = `${uid}_syncedMealIds`;
+    const prevSyncedStr = await AsyncStorage.getItem(syncedIdsKey);
     const prevSyncedIds = prevSyncedStr ? JSON.parse(prevSyncedStr) : [];
     const localIds = localMeals.map((m) => m.id);
     const deletedIds = prevSyncedIds.filter((id) => !localIds.includes(id));
 
     for (const id of deletedIds) {
-      await deleteDoc(doc(db, 'users', userId, 'meals', id));
+      await deleteDoc(doc(db, "users", uid, "meals", id));
     }
 
     for (const meal of localMeals) {
       const updatedMeal = { ...meal };
 
-      if (meal.image && !meal.image.startsWith('http')) {
+      // Upload image if it's a local file path
+      if (meal.image && !meal.image.startsWith("http")) {
         try {
           updatedMeal.image = await uploadImageToImgBB(meal.image);
         } catch (imgErr) {
-          console.error('Image upload failed:', imgErr);
+          console.error("Image upload failed:", imgErr);
         }
       }
 
-      await setDoc(doc(db, 'users', userId, 'meals', meal.id), {
+      await setDoc(doc(db, "users", uid, "meals", meal.id), {
         ...updatedMeal,
-        uid: userId,
+        uid,
         mealType: meal.mealType || activeTab,
         syncedAt: Date.now(),
       });
     }
 
-    await AsyncStorage.setItem('syncedMealIds', JSON.stringify(localIds));
+    await AsyncStorage.setItem(syncedIdsKey, JSON.stringify(localIds));
     triggerMealUpdate();
-    Alert.alert('Success', 'Meals Saved!');
+    Alert.alert("Success", "Meals Saved!");
   } catch (err) {
-    console.error('Sync Error:', err);
-    Alert.alert('Error', 'Failed to save meals.Check internet connection!');
+    console.error("Sync Error:", err);
+    Alert.alert("Error", "Failed to save meals. Check internet connection!");
   } finally {
     setIsSaving(false); // End loading
   }
@@ -196,9 +201,10 @@ const handleSaveToFirebase = async () => {
 
 
 
+
   const handleDeleteMeal = async (meal) => {
     try {
-      const key = `loggedMeals_${activeTab}`;
+     const key = `${auth.currentUser?.uid}_loggedMeals_${activeTab}`;
       const stored = await AsyncStorage.getItem(key);          // Get meals for current tab
       const meals = stored ? JSON.parse(stored) : [];
       const filtered = meals.filter((m) => m.id !== meal.id);  // Remove the meal with matching id

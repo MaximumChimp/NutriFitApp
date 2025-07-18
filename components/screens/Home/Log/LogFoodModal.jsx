@@ -17,6 +17,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect,useRoute} from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system';
 import { useMealUpdate } from '../../../context/MealUpdateContext';
+import { getAuth } from 'firebase/auth';
+const auth = getAuth();
 
 const dynamicTitles = {
   morning: {
@@ -174,61 +176,83 @@ export default function LogFoodModal({ navigation }) {
     }
   };
 
-  const handleSave = async () => {
-    if (!foodName || !kcal) {
-      Alert.alert('Missing Info', 'Please enter at least food name and calories.');
-      return;
-    }
+const handleSave = async () => {
+  const uid = auth?.currentUser?.uid;
+  console.log('[DEBUG] UID:', uid);
+  if (!foodName || !kcal) {
+    console.log('[DEBUG] Missing foodName or kcal:', { foodName, kcal });
+    Alert.alert('Missing Info', 'Please enter at least food name and calories.');
+    return;
+  }
 
-    const now = new Date();
-    const isEdit = !!mealToEdit;
-    const id = isEdit ? mealToEdit.id : `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
 
-    const newMeal = {
-      id,
-      name: foodName,
-      recipe,
-      image: image?.uri || null,
-      timestamp: isEdit ? mealToEdit.timestamp : now.toLocaleString('en-US', {
-        weekday: 'short',
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      calories: isNaN(parseInt(kcal)) ? 0 : parseInt(kcal),
-      macros: {
-        carbs: isNaN(parseInt(carbs)) ? 0 : parseInt(carbs),
-        protein: isNaN(parseInt(protein)) ? 0 : parseInt(protein),
-        fat: isNaN(parseInt(fat)) ? 0 : parseInt(fat),
-      },
-      mealType,
-      createdAt: isEdit ? mealToEdit.createdAt : now.toISOString(),
-      synced: false,
-    };
+  if (!uid) {
+    console.log('[DEBUG] User not signed in:', auth?.currentUser);
+    Alert.alert('Not signed in', 'Please sign in to save meals.');
+    return;
+  }
 
-    try {
-      const storageKey = `loggedMeals_${mealType}`;
-      const stored = await AsyncStorage.getItem(storageKey);
-      let meals = stored ? JSON.parse(stored) : [];
 
-      if (isEdit) {
-        // Replace existing meal
-        meals = meals.map((m) => (m.id === id ? newMeal : m));
-      } else {
-        // Add new meal
-        meals.push(newMeal);
-      }
 
-      await AsyncStorage.setItem(storageKey, JSON.stringify(meals));
-      triggerMealUpdate();
-      navigation.goBack();
-    } catch (error) {
-      console.error('[❌] Error saving meal:', error.message, error);
-      Alert.alert('Error', 'Failed to save meal locally.');
-    }
+  const now = new Date();
+  const isEdit = !!mealToEdit;
+  const id = isEdit ? mealToEdit.id : `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+
+  const newMeal = {
+    id,
+    name: foodName,
+    recipe,
+    image: image?.uri || null,
+    timestamp: isEdit ? mealToEdit.timestamp : now.toLocaleString('en-US', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }),
+    calories: isNaN(parseInt(kcal)) ? 0 : parseInt(kcal),
+    macros: {
+      carbs: isNaN(parseInt(carbs)) ? 0 : parseInt(carbs),
+      protein: isNaN(parseInt(protein)) ? 0 : parseInt(protein),
+      fat: isNaN(parseInt(fat)) ? 0 : parseInt(fat),
+    },
+    mealType,
+    createdAt: isEdit ? mealToEdit.createdAt : now.toISOString(),
+    synced: false,
   };
+
+  console.log('[DEBUG] New Meal Object:', newMeal);
+
+  try {
+    const storageKey = `${uid}_loggedMeals_${mealType}`;
+    console.log('[DEBUG] Storage Key:', storageKey);
+
+    const stored = await AsyncStorage.getItem(storageKey);
+    console.log('[DEBUG] Stored meals string:', stored);
+
+    let meals = stored ? JSON.parse(stored) : [];
+
+    if (isEdit) {
+      meals = meals.map((m) => (m.id === id ? newMeal : m));
+      console.log('[DEBUG] Updated meals list after edit:', meals);
+    } else {
+      meals.push(newMeal);
+      console.log('[DEBUG] Meals list after push:', meals);
+    }
+
+    await AsyncStorage.setItem(storageKey, JSON.stringify(meals));
+    console.log('[✅] Meal saved locally to AsyncStorage');
+
+    triggerMealUpdate?.();
+    navigation.goBack?.();
+  } catch (error) {
+    console.error('[❌] Error saving meal:', error.message, error);
+    Alert.alert('Error', 'Failed to save meal locally.');
+  }
+};
+
+
 
   
 

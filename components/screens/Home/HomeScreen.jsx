@@ -148,13 +148,18 @@ const macros = macrosPercent;
 
 
 const loadLocalMealsForDate = async (date) => {
+  const user = auth.currentUser;
+  if (!user) return;
+
+  const uid = user.uid;
+
   let totalCalories = 0;
   let totalCarbs = 0;
   let totalProtein = 0;
   let totalFat = 0;
 
   for (const tab of ['Breakfast', 'Lunch', 'Dinner']) {
-    const key = `loggedMeals_${tab}`;
+    const key = `${uid}_loggedMeals_${tab}`;
     const stored = await AsyncStorage.getItem(key);
     const meals = stored ? JSON.parse(stored) : [];
 
@@ -164,8 +169,6 @@ const loadLocalMealsForDate = async (date) => {
 
     for (const meal of filtered) {
       totalCalories += meal.calories || 0;
-
-      // ✅ Safely read from nested macros
       if (meal.macros) {
         totalCarbs += meal.macros.carbs || 0;
         totalProtein += meal.macros.protein || 0;
@@ -174,7 +177,6 @@ const loadLocalMealsForDate = async (date) => {
     }
   }
 
-  // ✅ Now update state directly
   const tefValue = totalCalories * 0.1;
 
   setCaloriesEaten(totalCalories);
@@ -186,6 +188,7 @@ const loadLocalMealsForDate = async (date) => {
     fat: Math.round(totalFat),
   });
 };
+
 
 
 useEffect(() => {
@@ -208,7 +211,7 @@ useEffect(() => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         const tdeeValue = data?.calorieBreakdown?.tdee;
-        setUserName(data.firstName || "User");
+        setUserName(data.firstName ||data.Name ||"User");
         setTdee(tdeeValue ?? 2000);
         setMealsLoading(true);
       }
@@ -367,17 +370,17 @@ const handleSync = async () => {
 
     // Merge Firebase meals with existing local ones
     for (const [type, firebaseMeals] of Object.entries(mealsByType)) {
-      const key = `loggedMeals_${type}`;
+      const key = `${currentUser.uid}_loggedMeals_${type}`;
       const existingRaw = await AsyncStorage.getItem(key);
       const existingMeals = existingRaw ? JSON.parse(existingRaw) : [];
 
-      // Merge by avoiding duplicates (based on meal.id)
       const existingIds = new Set(existingMeals.map(m => m.id));
       const newMeals = firebaseMeals.filter(m => !existingIds.has(m.id));
       const mergedMeals = [...existingMeals, ...newMeals];
 
       await AsyncStorage.setItem(key, JSON.stringify(mergedMeals));
     }
+
 
     // Refresh HomeScreen data using selectedDate
     await loadLocalMealsForDate(selectedDate);
