@@ -81,9 +81,7 @@ export default function OrderScreen() {
     });
   };
 
-  if (!isConnected) {
-    return <NoInternetScreen onRetry={handleRetry} />;
-  }
+
 
   const getCartStorageKey = () => {
     const auth = getAuth();
@@ -263,6 +261,11 @@ export default function OrderScreen() {
     setMapVisible(false);
   };
 
+
+    if (!isConnected) {
+    return <NoInternetScreen onRetry={handleRetry} />;
+  }
+
   /* ------------------------------------------------------------------
    * RENDER MEAL CARD
    * ---------------------------------------------------------------- */
@@ -298,6 +301,31 @@ export default function OrderScreen() {
           </View>
         </TouchableOpacity>
       </View>
+    <TouchableOpacity
+  onPress={async () => {
+    const key = getCartStorageKey();
+    if (!key) {
+      console.log('[DEBUG] No user, no storage key.');
+      return;
+    }
+
+    try {
+      const value = await AsyncStorage.getItem(key);
+      console.log('[DEBUG] Cart contents for key', key, ':', value);
+    } catch (err) {
+      console.error('[DEBUG] Failed to read cart:', err);
+    }
+  }}
+  style={{
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: '#d1fae5',
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  }}
+>
+  <Text style={{ color: '#065f46' }}>Debug Cart</Text>
+</TouchableOpacity>
 
       {/* Current Address */}
       {!!address && (
@@ -621,9 +649,20 @@ export default function OrderScreen() {
                 <Text style={styles.cartSummaryText}>
                   Items: {cartItemCount} • Total: ₱ {cartTotal.toFixed(2)}
                 </Text>
-                <TouchableOpacity style={styles.checkoutBtn} onPress={() => console.log('Checkout')}>
-                  <Text style={styles.checkoutBtnText}>Checkout</Text>
-                </TouchableOpacity>
+                <TouchableOpacity
+  style={styles.checkoutBtn}
+  onPress={() =>
+  navigation.navigate('PaymentMethod', {
+    cartItems: cart,
+    totalPrice: cartTotal,
+    deliveryAddress: address,
+  })
+}
+
+>
+  <Text style={styles.checkoutBtnText}>Checkout</Text>
+</TouchableOpacity>
+
               </View>
             )}
           </Animated.View>
@@ -640,7 +679,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f9fafb', paddingTop: 50, paddingHorizontal: 16 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   title: { fontSize: 26, fontWeight: '700', color: '#14532d' },
-  locationContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  locationContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 10,paddingHorizontal:1 },
   locationText: { fontSize: 14, marginLeft: 6, color: '#374151' },
   searchBar: { backgroundColor: '#e5e7eb', borderRadius: 12, padding: 10, marginBottom: 16, fontSize: 16, color: '#111827' },
   list: { paddingBottom: 100 },
@@ -665,7 +704,7 @@ const styles = StyleSheet.create({
   searchContainer: { padding: 12, backgroundColor: '#fff', gap: 8 },
   inputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f3f4f6', borderRadius: 10, paddingHorizontal: 10, height: 44 },
   inputIcon: { marginRight: 8 },
-  locationInput: { flex: 1, fontSize: 16, color: '#111827' },
+  locationInput: { flex: 1, fontSize: 26, color: '#111827'},
   pinMyLocation: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#ecfdf5', paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#10b981' },
   pinText: { color: '#065f46', fontWeight: '600', fontSize: 14 },
   confirmContainer: { backgroundColor: '#fff', padding: 12 },

@@ -24,6 +24,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { MealUpdateProvider } from './components/context/MealUpdateContext';
 import MealDetailScreen from './components/screens/Home/Meals/MealDetailScreen';
 import SelectLocationScreen from './components/screens/Home/Meals/SelectLocationScreen';
+import PaymentMethodScreen from './components/screens/Home/Meals/PaymentMethodScreen';
+import ConfirmOrderScreen from './components/screens/Home/Meals/ConfirmOrderScreen';
 import Toast,{BaseToast} from 'react-native-toast-message';
 const Stack = createNativeStackNavigator();
 
@@ -100,7 +102,13 @@ export default function App() {
             <Stack.Screen name="Order" component={OrderScreen} />
             <Stack.Screen name="MealDetail" component={MealDetailScreen} />
             <Stack.Screen name="SelectLocation" component={SelectLocationScreen} />
+            <Stack.Screen name="PaymentMethod" component={PaymentMethodScreen} />
             <Stack.Screen name="Meals" component={MealsScreen} />
+            <Stack.Screen
+              name="ConfirmOrder"
+              component={ConfirmOrderScreen}
+              options={{ title: 'Confirm Order' }}
+            />
             <Stack.Group screenOptions={{ presentation: 'modal' }}>
               <Stack.Screen name="LogFoodModal" component={LogFoodModal} options={{ title: "Log New Food" }} />
             </Stack.Group>
