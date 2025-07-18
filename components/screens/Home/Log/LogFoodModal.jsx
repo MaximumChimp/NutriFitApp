@@ -178,16 +178,13 @@ export default function LogFoodModal({ navigation }) {
 
 const handleSave = async () => {
   const uid = auth?.currentUser?.uid;
-  console.log('[DEBUG] UID:', uid);
   if (!foodName || !kcal) {
-    console.log('[DEBUG] Missing foodName or kcal:', { foodName, kcal });
     Alert.alert('Missing Info', 'Please enter at least food name and calories.');
     return;
   }
 
 
   if (!uid) {
-    console.log('[DEBUG] User not signed in:', auth?.currentUser);
     Alert.alert('Not signed in', 'Please sign in to save meals.');
     return;
   }
@@ -222,14 +219,11 @@ const handleSave = async () => {
     synced: false,
   };
 
-  console.log('[DEBUG] New Meal Object:', newMeal);
 
   try {
     const storageKey = `${uid}_loggedMeals_${mealType}`;
-    console.log('[DEBUG] Storage Key:', storageKey);
 
     const stored = await AsyncStorage.getItem(storageKey);
-    console.log('[DEBUG] Stored meals string:', stored);
 
     let meals = stored ? JSON.parse(stored) : [];
 
@@ -242,12 +236,10 @@ const handleSave = async () => {
     }
 
     await AsyncStorage.setItem(storageKey, JSON.stringify(meals));
-    console.log('[✅] Meal saved locally to AsyncStorage');
 
     triggerMealUpdate?.();
     navigation.goBack?.();
   } catch (error) {
-    console.error('[❌] Error saving meal:', error.message, error);
     Alert.alert('Error', 'Failed to save meal locally.');
   }
 };

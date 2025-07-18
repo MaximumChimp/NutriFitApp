@@ -14,8 +14,7 @@ import LandingScreen from './components/screens/LandingPage/LandingPage';
 import GetStarted from './components/screens/GetStarted/OnboardingScreen';
 import SignUpWithEmail from './components/screens/GetStarted/SignUpWithEmail';
 import LoginScreen from './components/screens/GetStarted/Login';
-import HomeScreen from './components/screens/Home/HomeScreen';
-import ProfileScreen from './components/screens/Home/ProfileScreen';
+import OrderScreen from './components/screens/Home/Meals/OrderScreen';
 import MainTabs from './components/navigation/MainTabs';
 import LogFoodModal from './components/screens/Home/Log/LogFoodModal';
 import MealsScreen from './components/screens/Home/MealsScreen';
@@ -23,8 +22,9 @@ import * as SplashScreenNative from 'expo-splash-screen';
 import { auth } from './config/firebase-config';
 import { onAuthStateChanged } from 'firebase/auth';
 import { MealUpdateProvider } from './components/context/MealUpdateContext';
-
-
+import MealDetailScreen from './components/screens/Home/Meals/MealDetailScreen';
+import SelectLocationScreen from './components/screens/Home/Meals/SelectLocationScreen';
+import Toast,{BaseToast} from 'react-native-toast-message';
 const Stack = createNativeStackNavigator();
 
 // Keep splash visible while we fetch resources
@@ -70,7 +70,22 @@ export default function App() {
   }, [splashVisible, initialRoute]);
 
   if (splashVisible || !initialRoute) return <SplashScreen />;
-
+  const toastConfig = {
+    success: (props) => (
+      <BaseToast
+        {...props}
+        style={{
+          borderLeftColor: '#22c55e',
+          alignSelf: 'flex-start',
+          marginLeft: 20,
+          marginRight: 'auto',
+          borderRadius: 10,
+        }}
+        text1Style={{ fontSize: 14, fontWeight: 'bold' }}
+        text2Style={{ fontSize: 12 }}
+      />
+    ),
+  };
   return (
     <GluestackUIProvider config={config}>
       <StatusBar style="auto" />
@@ -82,12 +97,15 @@ export default function App() {
             <Stack.Screen name="GetStarted" component={GetStarted} />
             <Stack.Screen name="SignUpWithEmail" component={SignUpWithEmail} />
             <Stack.Screen name="MainTabs" component={MainTabs} />
-            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="Order" component={OrderScreen} />
+            <Stack.Screen name="MealDetail" component={MealDetailScreen} />
+            <Stack.Screen name="SelectLocation" component={SelectLocationScreen} />
             <Stack.Screen name="Meals" component={MealsScreen} />
             <Stack.Group screenOptions={{ presentation: 'modal' }}>
               <Stack.Screen name="LogFoodModal" component={LogFoodModal} options={{ title: "Log New Food" }} />
             </Stack.Group>
           </Stack.Navigator>
+            <Toast config={toastConfig} />
         </NavigationContainer>
       </MealUpdateProvider>
     </GluestackUIProvider>

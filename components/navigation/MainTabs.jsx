@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from '../screens/Home/HomeScreen';
 import MealsScreen from '../screens/Home/MealsScreen';
 import HistoryScreen from '../screens/Home/HistoryScreen';
-import ProfileScreen from '../screens/Home/ProfileScreen'; // make sure this exists
+import OrderScreen from '../screens/Home/Meals/OrderScreen'; // make sure this file exists
 
 const Tab = createBottomTabNavigator();
 
@@ -14,20 +14,20 @@ export default function MainTabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarIcon: ({ color, size }) => {
+        tabBarIcon: ({ color, size, focused }) => {
           let iconName;
           switch (route.name) {
             case 'Home':
-              iconName = 'home';
+              iconName = focused ? 'home' : 'home-outline';
               break;
             case 'Meals':
-              iconName = 'fast-food';
+              iconName = focused ? 'fast-food' : 'fast-food-outline';
               break;
             case 'History':
-              iconName = 'bar-chart';
+              iconName = focused ? 'bar-chart' : 'bar-chart-outline';
               break;
-            case 'Profile':
-              iconName = 'person-circle';
+            case 'Order':
+              iconName = focused ? 'cart' : 'cart-outline';
               break;
           }
           return <Ionicons name={iconName} size={size} color={color} />;
@@ -43,7 +43,7 @@ export default function MainTabs() {
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Meals" component={MealsScreen} />
       <Tab.Screen name="History" component={HistoryScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Order" component={OrderScreen} />
     </Tab.Navigator>
   );
 }
