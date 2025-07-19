@@ -18,6 +18,7 @@ import { useFocusEffect,useRoute} from '@react-navigation/native';
 import * as FileSystem from 'expo-file-system';
 import { useMealUpdate } from '../../../context/MealUpdateContext';
 import { getAuth } from 'firebase/auth';
+import moment from 'moment';
 const auth = getAuth();
 
 const dynamicTitles = {
@@ -169,7 +170,7 @@ export default function LogFoodModal({ navigation }) {
       const localPath = await saveImageToLocal(asset.uri);
 
       if (localPath) {
-        setImage({ uri: localPath }); // ✅ Set local URI
+        setImage({ uri: localPath });
       } else {
         Alert.alert('Error', 'Could not save image locally.');
       }
@@ -237,6 +238,8 @@ const handleSave = async () => {
 
     await AsyncStorage.setItem(storageKey, JSON.stringify(meals));
 
+    await AsyncStorage.setItem('lastLoggedDate', moment().format('YYYY-MM-DD'));
+    
     triggerMealUpdate?.();
     navigation.goBack?.();
   } catch (error) {

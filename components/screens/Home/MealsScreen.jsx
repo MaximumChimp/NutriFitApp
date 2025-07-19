@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState,useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,8 @@ import {
   Image,
   Alert,
   Platform,
-  ActivityIndicator 
+  ActivityIndicator,
+  RefreshControl 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,6 +19,8 @@ import { db, auth } from '../../../config/firebase-config';
 import moment from 'moment';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { useMealUpdate } from '../../context/MealUpdateContext';
+import ShowStreakAnimation from './ShowStreakScreen';
+import LostStreakScreen from './LostStreakScreen';
 export default function MealsScreen() {
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState('Breakfast');
@@ -27,9 +30,12 @@ export default function MealsScreen() {
   const [viewMode, setViewMode] = useState('weekly');
   const [isCompactView, setIsCompactView] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [showStreakAnimation, setShowStreakAnimation] = useState(false);
+  const [showStreakBrokenAnimation, setShowStreakBrokenAnimation] = useState(false);
   const { triggerMealUpdate } = useMealUpdate();
   const tabs = ['Breakfast', 'Lunch', 'Dinner'];
-
+  const [streakCount, setStreakCount] = useState(0);
   const getWeekRange = (date) => {
     const start = moment(date).startOf('week');
     const end = moment(date).endOf('week');
@@ -46,6 +52,111 @@ export default function MealsScreen() {
     return grouped;
   };
 
+  const onRefresh = async () => {
+  setRefreshing(true);
+  try {
+    await loadLocalMeals();
+  } catch (err) {
+    console.error('Refresh failed:', err);
+  } finally {
+    setRefreshing(false);
+  }
+};
+
+useEffect(() => {
+  if (userMeals.some((m) => moment(m.createdAt).isSame(moment(), 'day'))) {
+    checkAndUpdateStreak();
+  }
+}, [userMeals]);
+
+
+const checkAndUpdateStreak = async () => {
+  try {
+    const uid = auth?.currentUser?.uid;
+    if (!uid) return null;
+
+    const streakKey = `${uid}_streakData`;
+    const today = moment().startOf('day');
+
+    const stored = await AsyncStorage.getItem(streakKey);
+    let streakData = stored ? JSON.parse(stored) : { lastDate: null, count: 0 };
+
+    const lastDate = moment(streakData.lastDate);
+    let updated = false;
+    let continued = false;
+
+    // Already counted today
+    if (lastDate.isValid() && today.isSame(lastDate, 'day')) {
+      return { updated: false, continued: false, count: streakData.count };
+    }
+
+    if (!lastDate.isValid() || today.diff(lastDate, 'days') > 1) {
+      // First log or reset streak
+      streakData.count = 1;
+    } else if (today.diff(lastDate, 'days') === 1) {
+      // Continue streak
+      streakData.count += 1;
+      continued = true;
+    }
+
+    streakData.lastDate = today.toISOString();
+    await AsyncStorage.setItem(streakKey, JSON.stringify(streakData));
+    updated = true;
+
+    return {
+      updated,
+      continued,
+      count: streakData.count,
+    };
+  } catch (error) {
+    console.error('Error updating streak:', error);
+    return null;
+  }
+};
+
+
+useFocusEffect(
+  React.useCallback(() => {
+    const run = async () => {
+      await loadLocalMeals();
+
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+
+      const allTabs = ['Breakfast', 'Lunch', 'Dinner'];
+      let hasTodayMeal = false;
+
+      for (const tab of allTabs) {
+        const key = `${uid}_loggedMeals_${tab}`;
+        const stored = await AsyncStorage.getItem(key);
+        const meals = stored ? JSON.parse(stored) : [];
+
+        if (
+          meals.some((m) => moment(m.createdAt).isSame(moment(), 'day'))
+        ) {
+          hasTodayMeal = true;
+          break;
+        }
+      }
+
+      if (hasTodayMeal) {
+        const result = await checkAndUpdateStreak();
+        if (result?.updated) {
+          setStreakCount(result.count);
+          setShowStreakAnimation(true);
+          console.log(`🔥 Streak ${result.continued ? 'continued' : 'started'}: ${result.count} days`);
+        }
+      }
+    };
+
+    run();
+  }, [])
+);
+
+
+
+
+  
 const loadLocalMeals = async () => {
   try {
     const uid = auth?.currentUser?.uid;
@@ -200,31 +311,68 @@ const handleSaveToFirebase = async () => {
 };
 
 
+const handleDeleteMeal = async (meal) => {
+  try {
+    const uid = auth.currentUser?.uid;
+    const key = `${uid}_loggedMeals_${activeTab}`;
+    const stored = await AsyncStorage.getItem(key);
+    const meals = stored ? JSON.parse(stored) : [];
 
+    // Remove the selected meal
+    const filtered = meals.filter((m) => m.id !== meal.id);
+    await AsyncStorage.setItem(key, JSON.stringify(filtered));
 
-  const handleDeleteMeal = async (meal) => {
-    try {
-     const key = `${auth.currentUser?.uid}_loggedMeals_${activeTab}`;
-      const stored = await AsyncStorage.getItem(key);          // Get meals for current tab
-      const meals = stored ? JSON.parse(stored) : [];
-      const filtered = meals.filter((m) => m.id !== meal.id);  // Remove the meal with matching id
+    triggerMealUpdate();
+    await loadLocalMeals();
 
-      await AsyncStorage.setItem(key, JSON.stringify(filtered)); // Save updated list to AsyncStorage
+    // ⏪ Check if any meals remain for today (across all tabs)
+    const allTabs = ['Breakfast', 'Lunch', 'Dinner'];
+    let mealsLeftToday = [];
 
-      Alert.alert('Deleted', `${meal.name} has been removed.`); // Show success alert
-      triggerMealUpdate();
-      loadLocalMeals(); // Reload meals into state
-    } catch (err) {
-      console.error('Delete Error:', err);
-      Alert.alert('Error', 'Failed to delete meal.');
+    for (const tab of allTabs) {
+      const tabKey = `${uid}_loggedMeals_${tab}`;
+      const tabStored = await AsyncStorage.getItem(tabKey);
+      const tabMeals = tabStored ? JSON.parse(tabStored) : [];
+
+      const todayMeals = tabMeals.filter((m) =>
+        moment(m.createdAt).isSame(moment(), 'day')
+      );
+
+      mealsLeftToday.push(...todayMeals);
     }
-  };
+
+    // If no meals remain for today, rollback streak
+    if (mealsLeftToday.length === 0) {
+      const streakKey = `${uid}_streakData`;
+      const storedStreak = await AsyncStorage.getItem(streakKey);
+
+      if (storedStreak) {
+        const streakData = JSON.parse(storedStreak);
+        const lastDate = moment(streakData.lastDate);
+
+        if (lastDate.isSame(moment(), 'day')) {
+          // Remove today's streak
+          streakData.lastDate = null;
+          streakData.count = streakData.count > 1 ? streakData.count - 1 : 0;
+
+          await AsyncStorage.setItem(streakKey, JSON.stringify(streakData));
+          console.log('⚠️ Streak rolled back due to deleting last meal for today.');
+          setShowStreakBrokenAnimation(true);
+        }
+      }
+    }
+
+  } catch (err) {
+    console.error('Delete Error:', err);
+    Alert.alert('Error', 'Failed to delete meal.');
+  }
+};
 
 
   const groupedMeals = groupMealsByDay(userMeals);
 
   return (
-    <View style={styles.container}>
+    <View style={styles.container} >
       <View style={styles.headerRow}>
         <Text style={styles.header}>Meals Overview</Text>
         <TouchableOpacity style={styles.saveButton} onPress={handleSaveToFirebase} disabled={isSaving}>
@@ -302,8 +450,12 @@ const handleSaveToFirebase = async () => {
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No meals logged yet</Text>
         </View>
-      ) : (
-        <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
+          ) : (
+            <ScrollView contentContainerStyle={{ paddingBottom: 120 }}
+            refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }
+        >
           {(viewMode === 'weekly' ? Object.entries(groupedMeals) : [['', userMeals]]).map(
             ([day, meals]) => (
               <View key={day}>
@@ -346,6 +498,18 @@ const handleSaveToFirebase = async () => {
           )}
         </ScrollView>
       )}
+      {showStreakBrokenAnimation && (
+        <LostStreakScreen onFinish={() => setShowStreakBrokenAnimation(false)} />
+      )}
+
+      {showStreakBrokenAnimation && (
+        <LostStreakScreen />
+      )}
+
+      {showStreakAnimation && (
+        <ShowStreakAnimation onFinish={() => setShowStreakAnimation(false)} />
+      )}
+
 
       <TouchableOpacity
         style={styles.floatingButton}
@@ -550,5 +714,21 @@ fullImage: {
   borderRadius: 10,
   marginBottom: 10,
 },
+streakContainer: {
+  position: 'absolute',
+  top: 80,
+  alignSelf: 'center',
+  alignItems: 'center',
+  backgroundColor: 'rgba(0,0,0,0.4)',
+  padding: 16,
+  borderRadius: 16,
+  zIndex: 999,
+},
+streakText: {
+  marginTop: 8,
+  color: 'white',
+  fontSize: 16,
+  fontWeight: 'bold',
+}
 
 });

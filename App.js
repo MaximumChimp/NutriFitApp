@@ -26,6 +26,7 @@ import MealDetailScreen from './components/screens/Home/Meals/MealDetailScreen';
 import SelectLocationScreen from './components/screens/Home/Meals/SelectLocationScreen';
 import PaymentMethodScreen from './components/screens/Home/Meals/PaymentMethodScreen';
 import ConfirmOrderScreen from './components/screens/Home/Meals/ConfirmOrderScreen';
+import LostStreakScreen from './components/screens/Home/LostStreakScreen';
 import Toast,{BaseToast} from 'react-native-toast-message';
 const Stack = createNativeStackNavigator();
 
@@ -104,6 +105,8 @@ export default function App() {
             <Stack.Screen name="SelectLocation" component={SelectLocationScreen} />
             <Stack.Screen name="PaymentMethod" component={PaymentMethodScreen} />
             <Stack.Screen name="Meals" component={MealsScreen} />
+            <Stack.Screen name="LostStreakScreen" component={LostStreakScreen} />
+
             <Stack.Screen
               name="ConfirmOrder"
               component={ConfirmOrderScreen}

@@ -85,7 +85,7 @@ const shimmer = {
 };
 
 const styles = StyleSheet.create({
-  container: { padding: 24 },
+  container: { padding: 24,paddingTop:50},
   header: { flexDirection: "row", alignItems: "center", marginBottom: 32 },
   profileCircle: {
     width: 48,

@@ -28,6 +28,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getAuth } from 'firebase/auth'; // <-- IMPORTANT
 import NetInfo from '@react-native-community/netinfo';
 import NoInternetScreen from './NoInternetScreen';
+import { LinearGradient } from 'expo-linear-gradient';
+import SkeletonPlaceholder from 'react-native-skeleton-placeholder';
+
 // layout constants
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const numColumns = 2;
@@ -49,6 +52,7 @@ export default function OrderScreen() {
   const [tempLocation, setTempLocation] = useState(null);
   const [locationQuery, setLocationQuery] = useState('');
   const [suggestions, setSuggestions] = useState([]);
+  const [refreshing, setRefreshing] = useState(false);
 
   const mapRef = useRef(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -69,18 +73,65 @@ export default function OrderScreen() {
   //Check Connection
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
-      setIsConnected(state.isConnected && state.isInternetReachable !== false);
+      const connected = state.isConnected && state.isInternetReachable !== false;
+      setIsConnected(connected);
+
+      if (connected) {
+        // Retry fetching data when internet is back
+        reloadOrderScreenData();
+      }
     });
 
     return () => unsubscribe();
   }, []);
 
+  
+  const reloadOrderScreenData = async () => {
+    setLoading(true);
+
+    try {
+      // Fetch meals again
+      const snapshot = await getDocs(collection(db, 'meals'));
+      const fetchedMeals = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMeals(fetchedMeals);
+      setFilteredMeals(fetchedMeals);
+    } catch (e) {
+      console.error('Error re-fetching meals:', e);
+    }
+
+    try {
+      // Refresh location
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const loc = await Location.getCurrentPositionAsync({});
+        setLocation(loc.coords);
+        setTempLocation(loc.coords);
+        const [addr] = await Location.reverseGeocodeAsync(loc.coords);
+        if (addr) setAddress(formatAddress(addr));
+      }
+    } catch (e) {
+      console.warn('Location refresh error:', e);
+    }
+
+    await fetchCart();
+    setLoading(false);
+  };
+
+
+
   const handleRetry = () => {
     NetInfo.fetch().then(state => {
-      setIsConnected(state.isConnected && state.isInternetReachable !== false);
+      const connected = state.isConnected && state.isInternetReachable !== false;
+      setIsConnected(connected);
+      if (connected) reloadOrderScreenData();
     });
   };
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await reloadOrderScreenData();
+    setRefreshing(false);
+  };
 
 
   const getCartStorageKey = () => {
@@ -301,34 +352,14 @@ export default function OrderScreen() {
           </View>
         </TouchableOpacity>
       </View>
-    <TouchableOpacity
-  onPress={async () => {
-    const key = getCartStorageKey();
-    if (!key) {
-      console.log('[DEBUG] No user, no storage key.');
-      return;
-    }
-
-    try {
-      const value = await AsyncStorage.getItem(key);
-      console.log('[DEBUG] Cart contents for key', key, ':', value);
-    } catch (err) {
-      console.error('[DEBUG] Failed to read cart:', err);
-    }
-  }}
-  style={{
-    marginTop: 8,
-    padding: 8,
-    backgroundColor: '#d1fae5',
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-  }}
->
-  <Text style={{ color: '#065f46' }}>Debug Cart</Text>
-</TouchableOpacity>
 
       {/* Current Address */}
-      {!!address && (
+      {loading ? (
+        <View style={styles.locationContainer}>
+          <View style={styles.skeletonCircle} />
+          <View style={styles.skeletonBar} />
+        </View>
+      ) : !!address && (
         <TouchableOpacity
           onPress={() =>
             navigation.navigate('SelectLocation', {
@@ -344,6 +375,7 @@ export default function OrderScreen() {
           <Text style={styles.locationText}>{address}</Text>
         </TouchableOpacity>
       )}
+
 
       {/* Search + Filter */}
       <View style={{ marginBottom: 12 }}>
@@ -369,19 +401,31 @@ export default function OrderScreen() {
       </View>
 
       {/* Meal Grid */}
-      {loading ? (
-        <ActivityIndicator color="#14532d" size="large" style={{ marginTop: 40 }} />
-      ) : (
-        <FlatList
-          data={filteredMeals}
-          renderItem={renderMeal}
-          keyExtractor={item => item.id}
-          numColumns={numColumns}
-          contentContainerStyle={styles.list}
-          columnWrapperStyle={{ justifyContent: 'space-between', marginBottom: 10 }}
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+{loading ? (
+  <View style={styles.list}>
+    <View style={styles.skeletonGrid}>
+      {[...Array(6)].map((_, i) => (
+        <View key={i} style={[styles.skeletonCard, { width: cardWidth }]}>
+          <View style={styles.skeletonCardImage} />
+          <View style={styles.skeletonCardName} />
+          <View style={styles.skeletonCardPrice} />
+        </View>
+      ))}
+    </View>
+  </View>
+) : (
+  <FlatList
+    data={filteredMeals}
+    renderItem={renderMeal}
+    keyExtractor={item => item.id}
+    numColumns={numColumns}
+    contentContainerStyle={styles.list}
+    columnWrapperStyle={{ justifyContent: 'space-between', marginBottom: 10 }}
+    showsVerticalScrollIndicator={false}
+    refreshing={refreshing}
+    onRefresh={handleRefresh}
+  />
+)}
 
       {/* Map Modal */}
       <Modal visible={mapVisible} animationType="slide">
@@ -811,4 +855,56 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  skeletonCircle: {
+  width: 18,
+  height: 18,
+  borderRadius: 4,
+  backgroundColor: '#e5e7eb',
+  marginRight: 6,
+},
+skeletonBar: {
+  width: 220,
+  height: 14,
+  borderRadius: 4,
+  backgroundColor: '#e5e7eb',
+},
+skeletonGrid: {
+  flexDirection: 'row',
+  flexWrap: 'wrap',
+  justifyContent: 'space-between',
+},
+
+skeletonCard: {
+  height: 180,
+  borderRadius: 12,
+  backgroundColor: '#fff',
+  marginBottom: 10,
+  padding: 8,
+  elevation: 1, // optional shadow
+},
+
+skeletonCardImage: {
+  width: '100%',
+  height: 100,
+  borderRadius: 10,
+  backgroundColor: '#e5e7eb',
+},
+
+skeletonCardName: {
+  marginTop: 8,
+  height: 16,
+  width: '60%',
+  borderRadius: 4,
+  backgroundColor: '#e5e7eb',
+},
+
+skeletonCardPrice: {
+  marginTop: 6,
+  height: 14,
+  width: '40%',
+  borderRadius: 4,
+  backgroundColor: '#e5e7eb',
+},
+
+
 });

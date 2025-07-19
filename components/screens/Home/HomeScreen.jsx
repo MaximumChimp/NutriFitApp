@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState,useCallback  } from "react";
 import Loader from "./Loader";
 import {
   View,
@@ -9,8 +9,10 @@ import {
   ActivityIndicator,
   Platform,
   Image,
-  TouchableWithoutFeedback
+  TouchableWithoutFeedback,
+  RefreshControl
 } from "react-native";
+import {useNavigation,useFocusEffect } from '@react-navigation/native';
 import DateTimePicker from "@react-native-community/datetimepicker";
 import Svg, { Circle } from "react-native-svg";
 import Animated, {
@@ -32,7 +34,10 @@ import { getAuth } from 'firebase/auth';
 import { Alert } from 'react-native';
 import moment from 'moment';
 import { useMealUpdate } from "../../context/MealUpdateContext";
+import NetInfo from '@react-native-community/netinfo';
+import LostStreakScreen from "./LostStreakScreen";
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
 
 const SIZE = 100;
 const STROKE_WIDTH = 4;
@@ -104,6 +109,7 @@ function CircleProgress({ percent = 0, color = "#22c55e", value,target, label })
 }
 
 export default function HomeScreen({ navigation }) {
+  const nav = useNavigation();
   const { updateFlag } = useMealUpdate();
   const [greeting, setGreeting] = useState("Hello");
   const [showSidebar, setShowSidebar] = useState(false);
@@ -122,12 +128,15 @@ export default function HomeScreen({ navigation }) {
   const [caloriesBurned, setCaloriesBurned] = useState(0);
   const [macrosPercent, setMacrosPercent] = useState({ carbs: 0, protein: 0, fat: 0 });
   const [caloriesLeft, setCaloriesLeft] = useState(0);
+  const [isConnected, setIsConnected] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lostStreakVisible, setLostStreakVisible] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
 
 const safeCaloriesTarget = tdee || 0;
 const safeCaloriesEaten = caloriesEaten || 0;
 const safeCaloriesBurned = caloriesBurned || 0;
 
-// ✅ Updated this line:
 const safeCaloriesLeft = caloriesLeft || 0;
 
 
@@ -145,6 +154,36 @@ const percentBurned = safeCaloriesTarget > 0
 
 
 const macros = macrosPercent;
+
+useEffect(() => {
+  const unsubscribe = NetInfo.addEventListener(state => {
+    const connected = state.isConnected && state.isInternetReachable !== false;
+    setIsConnected(connected);
+
+    if (connected) {
+      // ✅ Fetch suggestions when connection is restored
+      fetchMealSuggestions(tdee);
+    }
+  });
+
+  return () => unsubscribe();
+}, [tdee]);
+
+const onRefresh = async () => {
+  setRefreshing(true);
+
+  try {
+    await fetchMealSuggestions(tdee);      // reload meals
+    await loadLocalMealsForDate(selectedDate); // refresh local calories/macros
+  } catch (err) {
+    console.error("Refresh failed", err);
+  } finally {
+    setRefreshing(false);
+  }
+};
+
+
+
 
 
 const loadLocalMealsForDate = async (date) => {
@@ -195,6 +234,99 @@ useEffect(() => {
     loadLocalMealsForDate(selectedDate);
   }, [updateFlag]);
 
+
+
+useFocusEffect(
+  useCallback(() => {
+    const checkStreak = async () => {
+      const user = auth.currentUser;
+      if (!user) return;
+
+      try {
+        const lastLoggedStr = await AsyncStorage.getItem('lastLoggedDate');
+        const streakCountStr = await AsyncStorage.getItem('streakCount');
+        const longestStreakStr = await AsyncStorage.getItem('longestStreak');
+
+        if (!lastLoggedStr) return;
+
+        const lastLoggedDate = moment(lastLoggedStr, 'YYYY-MM-DD').startOf('day');
+        const today = moment().startOf('day');
+
+        if (lastLoggedDate.isAfter(today)) {
+          console.log('⚠️ lastLoggedDate is in the future, ignoring.');
+          return;
+        }
+
+        const daysSinceLastLogged = today.diff(lastLoggedDate, 'days');
+        const hasShownKey = `hasShownLostStreak_${today.format('YYYY-MM-DD')}`;
+        const alreadyShown = await AsyncStorage.getItem(hasShownKey);
+
+        let streakCount = parseInt(streakCountStr) || 0;
+        let longestStreak = parseInt(longestStreakStr) || 0;
+
+        if (daysSinceLastLogged === 1) {
+          // Consecutive day
+          streakCount += 1;
+          await AsyncStorage.setItem('streakCount', String(streakCount));
+
+          if (streakCount > longestStreak) {
+            longestStreak = streakCount;
+            await AsyncStorage.setItem('longestStreak', String(longestStreak));
+            console.log('🏆 New longest streak:', longestStreak);
+          }
+
+          console.log('✅ Streak maintained. Current streak:', streakCount);
+          setLostStreakVisible(false);
+
+        } else if (daysSinceLastLogged === 0) {
+          // Logged again today — keep streak as is
+          console.log('📅 Already logged today. Streak count unchanged:', streakCount);
+          setLostStreakVisible(false);
+
+        } else if (daysSinceLastLogged > 1) {
+          // Missed a day — streak lost
+          if (!alreadyShown) {
+            console.log('🔥 Missed day. Streak broken!');
+            setLostStreakVisible(true);
+            await AsyncStorage.setItem(hasShownKey, 'true');
+          } else {
+            console.log('ℹ️ Lost streak already shown today.');
+          }
+
+          // Reset current streak
+          await AsyncStorage.setItem('streakCount', '0');
+        }
+
+      } catch (error) {
+        console.error('🚨 Error checking streak:', error);
+      }
+    };
+
+    checkStreak();
+  }, [refreshKey])
+);
+
+
+
+
+// useEffect(() => {
+//   const getLoggedDate = async () => {
+//     try {
+//       const loggedDate = await AsyncStorage.getItem('lastLoggedDate');
+//       if (loggedDate) {
+//         console.log('📝 Current lastLoggedDate:', loggedDate);
+//       } else {
+//         console.log('⚠️ No lastLoggedDate found.');
+//       }
+//     } catch (error) {
+//       console.error('❌ Error fetching lastLoggedDate:', error);
+//     }
+//   };
+
+//   getLoggedDate();
+// }, []);
+
+
 useEffect(() => {
   const hour = new Date().getHours();
   setGreeting(
@@ -224,26 +356,30 @@ useEffect(() => {
 
   fetchUserData();
 }, []);
+
+
+
+const fetchMealSuggestions = async (tdeeValue) => {
+  if (!tdeeValue) return;
+  try {
+    setMealsLoading(true);
+    const snapshot = await getDocs(collection(db, "meals"));
+    const allMeals = snapshot.docs.map((doc) => doc.data());
+    const validMeals = allMeals.filter(
+      (meal) => meal.calories && meal.calories <= (tdeeValue - 1350)
+    );
+    const shuffled = validMeals.sort(() => 0.5 - Math.random());
+    setSuggestions(shuffled.slice(0, 3));
+  } catch (err) {
+    console.error("Failed to fetch meals:", err);
+  } finally {
+    setMealsLoading(false);
+  }
+};
+
 useEffect(() => {
   if (tdee) {
-    const fetchSuggestions = async () => {
-      try {
-        setMealsLoading(true);
-        const snapshot = await getDocs(collection(db, "meals"));
-        const allMeals = snapshot.docs.map((doc) => doc.data());
-        const validMeals = allMeals.filter(
-          (meal) => meal.calories && meal.calories <= (tdee - 1350)
-        );
-        const shuffled = validMeals.sort(() => 0.5 - Math.random());
-        setSuggestions(shuffled.slice(0, 3));
-      } catch (err) {
-        console.error("Failed to fetch meals:", err);
-      } finally {
-        setMealsLoading(false);
-      }
-    };
-
-    fetchSuggestions();
+    fetchMealSuggestions(tdee);
   }
 }, [selectedDate, tdee]);
 
@@ -393,9 +529,17 @@ const handleSync = async () => {
 };
 
 
+
+
 return (
   <View style={styles.container}>
-    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <ScrollView 
+      contentContainerStyle={styles.content} 
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }  
+    >
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => setShowSidebar(true)}>
@@ -413,29 +557,29 @@ return (
       </View>
 
       {/* Date Navigation */}
-<View style={styles.dateNav}>
-  <TouchableOpacity style={styles.dateArrow} onPress={goToPreviousDay}>
-    <Ionicons name="chevron-back" size={30} color="#14532d" />
-  </TouchableOpacity>
+      <View style={styles.dateNav}>
+        <TouchableOpacity style={styles.dateArrow} onPress={goToPreviousDay}>
+          <Ionicons name="chevron-back" size={30} color="#14532d" />
+        </TouchableOpacity>
 
-  <TouchableOpacity style={styles.dateTextWrapper} onPress={() => setShowPicker(true)}>
-    <Text style={styles.dateText}>
-      {isToday ? "Today" : selectedDate.toDateString()}
-    </Text>
-  </TouchableOpacity>
+        <TouchableOpacity style={styles.dateTextWrapper} onPress={() => setShowPicker(true)}>
+          <Text style={styles.dateText}>
+            {isToday ? "Today" : selectedDate.toDateString()}
+          </Text>
+        </TouchableOpacity>
 
-  <TouchableOpacity
-    style={styles.dateArrow}
-    onPress={goToNextDay}
-    disabled={isToday}
-  >
-    <Ionicons
-      name="chevron-forward"
-      size={30}
-      color={isToday ? "#d1d5db" : "#14532d"}
-    />
-  </TouchableOpacity>
-</View>
+        <TouchableOpacity
+          style={styles.dateArrow}
+          onPress={goToNextDay}
+          disabled={isToday}
+        >
+          <Ionicons
+            name="chevron-forward"
+            size={30}
+            color={isToday ? "#d1d5db" : "#14532d"}
+          />
+        </TouchableOpacity>
+      </View>
 
 
       {showPicker && (
@@ -449,231 +593,232 @@ return (
       )}
 
       {/* Circles */}
-<Animated.View entering={FadeIn.duration(400)} style={styles.circleRow}>
-  {mealsLoading ? (
-    <>
-      <CircleSkeleton />
-      <CircleSkeleton />
-      <CircleSkeleton />
-    </>
-  ) : (
-    <>
-      <CircleProgress
-        percent={percentEaten}
-        value={safeCaloriesEaten}
-        target={safeCaloriesTarget}
-        color="#22c55e"
-        label="Eaten"
-      />
-      <CircleProgress
-        percent={percentLeft}
-        value={safeCaloriesLeft}
-        target={safeCaloriesTarget}
-        color="#eab308"
-        label="Left"
-      />
-      <CircleProgress
-        percent={percentBurned}
-        value={safeCaloriesBurned}
-        target={safeCaloriesTarget}
-        color="#ef4444"
-        label="Burned"
-      />
-    </>
-  )}
-</Animated.View>
-
-
+      <Animated.View entering={FadeIn.duration(400)} style={styles.circleRow}>
+        {mealsLoading ? (
+          <>
+            <CircleSkeleton />
+            <CircleSkeleton />
+            <CircleSkeleton />
+          </>
+        ) : (
+          <>
+            <CircleProgress
+              percent={percentEaten}
+              value={safeCaloriesEaten}
+              target={safeCaloriesTarget}
+              color="#22c55e"
+              label="Eaten"
+            />
+            <CircleProgress
+              percent={percentLeft}
+              value={safeCaloriesLeft}
+              target={safeCaloriesTarget}
+              color="#eab308"
+              label="Left"
+            />
+            <CircleProgress
+              percent={percentBurned}
+              value={safeCaloriesBurned}
+              target={safeCaloriesTarget}
+              color="#ef4444"
+              label="Burned"
+            />
+          </>
+        )}
+      </Animated.View>
 
       {/* Macros */}
-<View style={styles.section}>
-  <Text style={styles.sectionTitle}>Macros</Text>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Macros</Text>
 
-  {mealsLoading ? (
-    <>
-      <MacroSkeleton />
-      <MacroSkeleton />
-      <MacroSkeleton />
-    </>
-  ) : (
-    [
-      { label: "Carbs", value: macros.carbs, color: "#facc15" },
-      { label: "Protein", value: macros.protein, color: "#34d399" },
-      { label: "Fat", value: macros.fat, color: "#f87171" }
-    ].map((item) => (
-      <View style={styles.macroRow} key={item.label}>
-        <Text style={styles.macroLabel}>{item.label}</Text>
-        <View style={styles.progressBar}>
-          <View
-            style={[
-              styles.progressFill,
-              {
-                width: `${Math.min(item.value, 100)}%`,
-                backgroundColor: item.color,
-              },
-            ]}
-          />
-        </View>
-        <Text style={styles.percent}>{item.value}g</Text>
+        {mealsLoading ? (
+          <>
+            <MacroSkeleton />
+            <MacroSkeleton />
+            <MacroSkeleton />
+          </>
+        ) : (
+          [
+            { label: "Carbs", value: macros.carbs, color: "#facc15" },
+            { label: "Protein", value: macros.protein, color: "#34d399" },
+            { label: "Fat", value: macros.fat, color: "#f87171" }
+          ].map((item) => (
+            <View style={styles.macroRow} key={item.label}>
+              <Text style={styles.macroLabel}>{item.label}</Text>
+              <View style={styles.progressBar}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    {
+                      width: `${Math.min(item.value, 100)}%`,
+                      backgroundColor: item.color,
+                    },
+                  ]}
+                />
+              </View>
+              <Text style={styles.percent}>{item.value}g</Text>
+            </View>
+          ))
+        )}
       </View>
-    ))
-  )}
-</View>
 
       {/* Meal Suggestions */}
-      {suggestions.length > 0 && (
-       <View style={styles.section}>
-  <Text style={styles.sectionTitle}>Meal Suggestions</Text>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Meal Suggestions</Text>
 
-    {mealsLoading || tdee === null ? (
-      <View
-        style={{
-          width: CARD_WIDTH,
-          height: 140,
-          borderRadius: 16,
-          backgroundColor: "#e5e7eb",
-          alignSelf: "center",
-          marginTop: 20,
-        }}
-      />
-    ) : suggestions.length > 0 ? (
-      // Show scrollable meal suggestions
-      <View style={{ alignItems: "center", paddingVertical: 20 }}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={CARD_WIDTH + 16}
-          decelerationRate="fast"
-          pagingEnabled={false}
-          contentContainerStyle={{ paddingBottom: 20 }}
-        >
-          {suggestions.map((meal, index) => {
-            const isExpanded = expandedIndex === index;
-            return (
-              <TouchableOpacity
-                key={index}
-                style={[styles.suggestionItemHorizontal, { width: CARD_WIDTH }]}
-                activeOpacity={0.9}
-                onPress={() =>
-                  setExpandedIndex(isExpanded ? null : index)
-                }
-              >
-                {meal.image && (
-                  <View style={styles.imageContainer}>
-                    <Image
-                      source={{ uri: meal.image }}
-                      style={styles.suggestionImage}
-                    />
-                  </View>
-                )}
-                <View style={styles.suggestionText}>
-                  <View style={styles.suggestionTopRow}>
-                    <Text style={styles.suggestionName}>{meal.mealName}</Text>
-                    <Ionicons name="star-outline" size={20} color="#facc15" />
-                  </View>
-                  <Text style={styles.suggestionCalories}>
-                    {meal.calories ?? 0} kcal
-                  </Text>
-                  {meal.description && (
-                    <Text
-                      style={[
-                        styles.suggestionDescription,
-                        !isExpanded && styles.suggestionDescriptionCollapsed,
-                      ]}
-                      numberOfLines={isExpanded ? undefined : 2}
-                    >
-                      {meal.description}
-                    </Text>
-                  )}
-                  <TouchableOpacity style={styles.logButton}>
-                    <Text style={styles.logButtonText}>Add Meal</Text>
+        {!isConnected ? (
+          <Text style={{ color: "#6b7280", marginTop: 10 }}>
+            Looks like you're offline. We'll load meal suggestions as soon as you're back online.
+          </Text>
+        ) : mealsLoading || tdee === null ? (
+          <View
+            style={{
+              width: CARD_WIDTH,
+              height: 140,
+              borderRadius: 16,
+              backgroundColor: "#e5e7eb",
+              alignSelf: "center",
+              marginTop: 20,
+            }}
+          />
+        ) : suggestions.length > 0 ? (
+          <View style={{ alignItems: "center", paddingVertical: 20 }}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={CARD_WIDTH + 16}
+              decelerationRate="fast"
+              pagingEnabled={false}
+              contentContainerStyle={{ paddingBottom: 20 }}
+            >
+              {suggestions.map((meal, index) => {
+                const isExpanded = expandedIndex === index;
+                return (
+                  <TouchableOpacity
+                    key={index}
+                    style={[styles.suggestionItemHorizontal, { width: CARD_WIDTH }]}
+                    activeOpacity={0.9}
+                    onPress={() => setExpandedIndex(isExpanded ? null : index)}
+                  >
+                    {meal.image && (
+                      <View style={styles.imageContainer}>
+                        <Image
+                          source={{ uri: meal.image }}
+                          style={styles.suggestionImage}
+                        />
+                      </View>
+                    )}
+                    <View style={styles.suggestionText}>
+                      <View style={styles.suggestionTopRow}>
+                        <Text style={styles.suggestionName}>{meal.mealName}</Text>
+                        <Ionicons name="star-outline" size={20} color="#facc15" />
+                      </View>
+                      <Text style={styles.suggestionCalories}>
+                        {meal.calories ?? 0} kcal
+                      </Text>
+                      {meal.description && (
+                        <Text
+                          style={[
+                            styles.suggestionDescription,
+                            !isExpanded && styles.suggestionDescriptionCollapsed,
+                          ]}
+                          numberOfLines={isExpanded ? undefined : 2}
+                        >
+                          {meal.description}
+                        </Text>
+                      )}
+                      <TouchableOpacity style={styles.logButton}>
+                        <Text style={styles.logButtonText}>Add Meal</Text>
+                      </TouchableOpacity>
+                    </View>
                   </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-    ) : (
-      <Text style={{ color: "#6b7280", marginTop: 10 }}>
-        No suggestions available.
-      </Text>
-    )}
-
-</View>
-
-      )}
-     
+                );
+              })}
+            </ScrollView>
+          </View>
+        ) : (
+          <Text style={{ color: "#6b7280", marginTop: 10 }}>
+            No suggestions available.
+          </Text>
+        )}
+      </View>     
     </ScrollView>
 
     {/* Sidebar Modal */}
-{showSidebar && (
-  <Animated.View style={[styles.sidebarOverlay, animatedOverlayStyle]}>
-    {/* Backdrop for dismissing sidebar */}
-    <TouchableWithoutFeedback
-      onPress={() => {
-        sidebarAnim.value = withTiming(-260, { duration: 300 });
-        overlayOpacity.value = withTiming(0, { duration: 300 }, () => {
-          runOnJS(setShowSidebar)(false);
-        });
-      }}
-    >
-      <View style={styles.sidebarBackdrop} />
-    </TouchableWithoutFeedback>
+    {showSidebar && (
+      <Animated.View style={[styles.sidebarOverlay, animatedOverlayStyle]}>
+        {/* Backdrop for dismissing sidebar */}
+        <TouchableWithoutFeedback
+          onPress={() => {
+            sidebarAnim.value = withTiming(-260, { duration: 300 });
+            overlayOpacity.value = withTiming(0, { duration: 300 }, () => {
+              runOnJS(setShowSidebar)(false);
+            });
+          }}
+        >
+          <View style={styles.sidebarBackdrop} />
+        </TouchableWithoutFeedback>
 
-    {/* Sidebar Panel */}
-    <Animated.View style={[styles.sidebar, animatedSidebarStyle]}>
-     <View style={styles.sidebarHeaderWithUser}>
-  <View style={styles.sidebarUserInfo}>
-    <Image
-      source={{ uri: "https://i.pravatar.cc/150?u=" + userName }}
-      style={styles.sidebarUserImage}
-    />
-    <Text style={styles.sidebarUserName}>{userName}</Text>
-  </View>
-  <TouchableOpacity
-    onPress={() => {
-      sidebarAnim.value = withTiming(-260, { duration: 300 });
-      overlayOpacity.value = withTiming(0, { duration: 300 }, () => {
-        runOnJS(setShowSidebar)(false);
-      });
-    }}
-    style={styles.closeButton}
-    activeOpacity={0.8}
-  >
-    <Ionicons name="close" size={20} color="#6b7280" />
-  </TouchableOpacity>
-    </View>
-
-
-      <TouchableOpacity style={styles.sidebarItem}>
-        <Ionicons name="person-outline" size={20} color="#14532d" />
-        <Text style={styles.sidebarItemText}>Account</Text>
+        {/* Sidebar Panel */}
+        <Animated.View style={[styles.sidebar, animatedSidebarStyle]}>
+        <View style={styles.sidebarHeaderWithUser}>
+      <View style={styles.sidebarUserInfo}>
+        <Image
+          source={{ uri: "https://i.pravatar.cc/150?u=" + userName }}
+          style={styles.sidebarUserImage}
+        />
+        <Text style={styles.sidebarUserName}>{userName}</Text>
+      </View>
+      <TouchableOpacity
+        onPress={() => {
+          sidebarAnim.value = withTiming(-260, { duration: 300 });
+          overlayOpacity.value = withTiming(0, { duration: 300 }, () => {
+            runOnJS(setShowSidebar)(false);
+          });
+        }}
+        style={styles.closeButton}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="close" size={20} color="#6b7280" />
       </TouchableOpacity>
-
-      <TouchableOpacity style={styles.sidebarItem}>
-        <Ionicons name="settings-outline" size={20} color="#14532d" />
-        <Text style={styles.sidebarItemText}>Settings</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.sidebarItem} onPress={handleSync}>
-        <Ionicons name="sync-outline" size={20} color="#14532d" />
-        <Text style={styles.sidebarItemText}>Sync</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.sidebarItem} onPress={handleLogout}>
-        <Ionicons name="log-out-outline" size={20} color="#14532d" />
-        <Text style={styles.sidebarItemText}>Logout</Text>
-      </TouchableOpacity>
-    </Animated.View>
-  </Animated.View>
-)}
+        </View>
 
 
+          <TouchableOpacity style={styles.sidebarItem}>
+            <Ionicons name="person-outline" size={20} color="#14532d" />
+            <Text style={styles.sidebarItemText}>Account</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.sidebarItem}>
+            <Ionicons name="settings-outline" size={20} color="#14532d" />
+            <Text style={styles.sidebarItemText}>Settings</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.sidebarItem} onPress={handleSync}>
+            <Ionicons name="sync-outline" size={20} color="#14532d" />
+            <Text style={styles.sidebarItemText}>Sync</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.sidebarItem} onPress={handleLogout}>
+            <Ionicons name="log-out-outline" size={20} color="#14532d" />
+            <Text style={styles.sidebarItemText}>Logout</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </Animated.View>
+    )}
+    
+    {lostStreakVisible && (
+      <LostStreakScreen
+        onFinish={() => {
+          setLostStreakVisible(false);
+          setRefreshKey(prev => prev + 1); // 🔄 Triggers re-check and reload
+        }}
+      />
+    )}
 
   </View>
 );
-
+  
 }
 
 const styles = StyleSheet.create({
