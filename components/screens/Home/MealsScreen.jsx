@@ -20,7 +20,6 @@ import moment from 'moment';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { useMealUpdate } from '../../context/MealUpdateContext';
 import ShowStreakAnimation from './ShowStreakScreen';
-import LostStreakScreen from './LostStreakScreen';
 export default function MealsScreen() {
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState('Breakfast');
@@ -32,7 +31,6 @@ export default function MealsScreen() {
   const [isSaving, setIsSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showStreakAnimation, setShowStreakAnimation] = useState(false);
-  const [showStreakBrokenAnimation, setShowStreakBrokenAnimation] = useState(false);
   const { triggerMealUpdate } = useMealUpdate();
   const tabs = ['Breakfast', 'Lunch', 'Dinner'];
   const [streakCount, setStreakCount] = useState(0);
@@ -341,27 +339,6 @@ const handleDeleteMeal = async (meal) => {
       mealsLeftToday.push(...todayMeals);
     }
 
-    // If no meals remain for today, rollback streak
-    if (mealsLeftToday.length === 0) {
-      const streakKey = `${uid}_streakData`;
-      const storedStreak = await AsyncStorage.getItem(streakKey);
-
-      if (storedStreak) {
-        const streakData = JSON.parse(storedStreak);
-        const lastDate = moment(streakData.lastDate);
-
-        if (lastDate.isSame(moment(), 'day')) {
-          // Remove today's streak
-          streakData.lastDate = null;
-          streakData.count = streakData.count > 1 ? streakData.count - 1 : 0;
-
-          await AsyncStorage.setItem(streakKey, JSON.stringify(streakData));
-          console.log('⚠️ Streak rolled back due to deleting last meal for today.');
-          setShowStreakBrokenAnimation(true);
-        }
-      }
-    }
-
   } catch (err) {
     console.error('Delete Error:', err);
     Alert.alert('Error', 'Failed to delete meal.');
@@ -497,13 +474,6 @@ const handleDeleteMeal = async (meal) => {
             )
           )}
         </ScrollView>
-      )}
-      {showStreakBrokenAnimation && (
-        <LostStreakScreen onFinish={() => setShowStreakBrokenAnimation(false)} />
-      )}
-
-      {showStreakBrokenAnimation && (
-        <LostStreakScreen />
       )}
 
       {showStreakAnimation && (

@@ -243,17 +243,25 @@ useFocusEffect(
       if (!user) return;
 
       try {
+        
         const lastLoggedStr = await AsyncStorage.getItem('lastLoggedDate');
+
         const streakCountStr = await AsyncStorage.getItem('streakCount');
         const longestStreakStr = await AsyncStorage.getItem('longestStreak');
 
         if (!lastLoggedStr) return;
 
-        const lastLoggedDate = moment(lastLoggedStr, 'YYYY-MM-DD').startOf('day');
-        const today = moment().startOf('day');
+        
+        const lastLoggedDate = moment(lastLoggedStr, 'YYYY-MM-DD').utcOffset(8).startOf('day');
+        const today = moment().utcOffset(8).startOf('day');
+
+
+        console.log('✅ Checking streak...');
+        console.log('Today:', today);
+        console.log(lastLoggedDate)
 
         if (lastLoggedDate.isAfter(today)) {
-          console.log('⚠️ lastLoggedDate is in the future, ignoring.');
+          //console.log('⚠️ lastLoggedDate is in the future, ignoring.');
           return;
         }
 
@@ -272,7 +280,7 @@ useFocusEffect(
           if (streakCount > longestStreak) {
             longestStreak = streakCount;
             await AsyncStorage.setItem('longestStreak', String(longestStreak));
-            console.log('🏆 New longest streak:', longestStreak);
+           // console.log('🏆 New longest streak:', longestStreak);
           }
 
           console.log('✅ Streak maintained. Current streak:', streakCount);
@@ -280,7 +288,7 @@ useFocusEffect(
 
         } else if (daysSinceLastLogged === 0) {
           // Logged again today — keep streak as is
-          console.log('📅 Already logged today. Streak count unchanged:', streakCount);
+         // console.log('📅 Already logged today. Streak count unchanged:', streakCount);
           setLostStreakVisible(false);
 
         } else if (daysSinceLastLogged > 1) {
@@ -290,7 +298,7 @@ useFocusEffect(
             setLostStreakVisible(true);
             await AsyncStorage.setItem(hasShownKey, 'true');
           } else {
-            console.log('ℹ️ Lost streak already shown today.');
+           // console.log('ℹ️ Lost streak already shown today.');
           }
 
           // Reset current streak
@@ -302,6 +310,8 @@ useFocusEffect(
       }
     };
 
+
+
     checkStreak();
   }, [refreshKey])
 );
@@ -309,22 +319,6 @@ useFocusEffect(
 
 
 
-// useEffect(() => {
-//   const getLoggedDate = async () => {
-//     try {
-//       const loggedDate = await AsyncStorage.getItem('lastLoggedDate');
-//       if (loggedDate) {
-//         console.log('📝 Current lastLoggedDate:', loggedDate);
-//       } else {
-//         console.log('⚠️ No lastLoggedDate found.');
-//       }
-//     } catch (error) {
-//       console.error('❌ Error fetching lastLoggedDate:', error);
-//     }
-//   };
-
-//   getLoggedDate();
-// }, []);
 
 
 useEffect(() => {
@@ -332,7 +326,7 @@ useEffect(() => {
   setGreeting(
     hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"
   );
-
+  
   const fetchUserData = async () => {
     try {
       const user = auth.currentUser;
