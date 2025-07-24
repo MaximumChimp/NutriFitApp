@@ -28,6 +28,7 @@ import PaymentMethodScreen from './components/screens/Home/Meals/PaymentMethodSc
 import ConfirmOrderScreen from './components/screens/Home/Meals/ConfirmOrderScreen';
 import LostStreakScreen from './components/screens/Home/LostStreakScreen';
 import Toast,{BaseToast} from 'react-native-toast-message';
+import * as Notifications from 'expo-notifications';
 const Stack = createNativeStackNavigator();
 
 // Keep splash visible while we fetch resources
@@ -38,6 +39,14 @@ SplashScreenNative.preventAutoHideAsync().catch(() => {
 export default function App() {
   const [splashVisible, setSplashVisible] = useState(true);
   const [initialRoute, setInitialRoute] = useState(null);
+
+  Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
 
   useEffect(() => {
     let unsubscribe;

@@ -696,12 +696,14 @@ export default function OrderScreen() {
                 <TouchableOpacity
   style={styles.checkoutBtn}
   onPress={() =>
-  navigation.navigate('PaymentMethod', {
-    cartItems: cart,
-    totalPrice: cartTotal,
-    deliveryAddress: address,
-  })
-}
+    navigation.navigate('PaymentMethod', {
+      cartItems: cart,
+      totalPrice: cartTotal,
+      deliveryAddress: address,
+      deliveryCoords: location, 
+    })
+  }
+
 
 >
   <Text style={styles.checkoutBtnText}>Checkout</Text>

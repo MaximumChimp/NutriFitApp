@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, Image, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage'
 import { getFirestore, collection, onSnapshot } from 'firebase/firestore';
 import { app } from '../../../../config/firebase-config';
 
@@ -26,10 +27,19 @@ const PAYMENT_METHODS_STATIC = {
 };
 
 export default function PaymentMethodScreen({ navigation, route }) {
-  const { cart, totalPrice, userAddress } = route.params;
+  const {
+    cartItems = [],
+    totalPrice = 0,
+    deliveryAddress = '',
+    deliveryCoords = { latitude: null, longitude: null },
+  } = route.params || {};
+
+
   const [selected, setSelected] = useState(null);
   const [methods, setMethods] = useState([]);
   const [loading, setLoading] = useState(true);
+
+const mealNames = cartItems.map(item => item.mealName);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, 'payment'), (snapshot) => {
@@ -62,16 +72,36 @@ export default function PaymentMethodScreen({ navigation, route }) {
     return () => unsubscribe();
   }, []);
 
-    const handleConfirm = () => {
-    if (!selected) return;
+const handleConfirm = async () => {
+  if (!selected) return;
+
+  try {
+    const simplifiedCart = cartItems.map(item => ({
+      mealName: item.mealName,
+      price: item.price,
+      quantity: item.quantity || 1, 
+    }));
+
+    await AsyncStorage.setItem('cartMeals', JSON.stringify(simplifiedCart));
+    await AsyncStorage.setItem('paymentMethod', selected);
+    await AsyncStorage.setItem('totalPrice', totalPrice.toString());
+    await AsyncStorage.setItem('deliveryAddress', deliveryAddress);
 
     navigation.navigate('ConfirmOrder', {
-        paymentMethod: selected,
-        cartItems: cart,
-        totalPrice,
-        deliveryAddress: userAddress,
-    });
-    };
+      cartMeals: simplifiedCart,
+      totalPrice,
+      deliveryAddress,
+      paymentMethod: selected,
+      location: deliveryCoords, 
+    })
+
+
+  } catch (err) {
+    console.error('Error saving to AsyncStorage:', err);
+  }
+};
+
+
 
 
   const renderItem = ({ item }) => {
@@ -143,7 +173,7 @@ export default function PaymentMethodScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: '#fefce8', paddingTop: 50 },
+  container: { flex: 1, padding: 20, backgroundColor: '#ffffff', paddingTop: 50 },
   title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20,color:'#14532d'},
   option: {
     flexDirection: 'row',

@@ -17,21 +17,26 @@
       "backgroundColor": "#ffffff"
     },
     "plugins": [
-    [
-      "expo-splash-screen",
-      {
-        "android": {
-          "userInterfaceStyle": "light",
-          "resizeMode": "cover",
-          "statusBarTranslucent": true
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "android": {
+            "userInterfaceStyle": "light",
+            "resizeMode": "cover",
+            "statusBarTranslucent": true
+          }
         }
-      }
-    ]
-  ],
+      ],
+      "expo-notifications"
+    ],
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/icon.png",
         "backgroundColor": "#FFFFFF"
@@ -41,9 +46,8 @@
       "permissions": [
         "CAMERA",
         "ACCESS_FINE_LOCATION",
-        "NOTIFICATIONS",
-        "CAMERA",
-        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
         "NOTIFICATIONS"
       ]
     },

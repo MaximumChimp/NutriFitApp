@@ -3,140 +3,244 @@ import {
   View,
   Text,
   StyleSheet,
+  FlatList,
   TouchableOpacity,
   Alert,
-  ScrollView,
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
+import { getAuth } from 'firebase/auth';
 import {
   getFirestore,
   collection,
   addDoc,
   serverTimestamp,
+  GeoPoint,
 } from 'firebase/firestore';
-import { app } from '../../../../config/firebase-config';
-
-const db = getFirestore(app);
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function ConfirmOrderScreen() {
   const route = useRoute();
   const navigation = useNavigation();
-
-  // Safe destructure with fallback to prevent crash
   const {
-    cartItems = [],
-    totalPrice = 0,
-    deliveryAddress = 'No address',
-    paymentMethod = 'cod',
-  } = route.params || {};
+    cartMeals = [],
+    totalPrice,
+    deliveryAddress,
+    paymentMethod,
+    location = { latitude: null, longitude: null },
+  } = route.params;
 
   const handlePlaceOrder = async () => {
     try {
-      const order = {
-        items: cartItems.map((item) => ({
-          name: item.mealName,
-          quantity: item.quantity,
-          price: item.price,
-        })),
-        total: totalPrice,
-        address: deliveryAddress,
+      const auth = getAuth();
+      const user = auth.currentUser;
+      if (!user) {
+        Alert.alert('Error', 'You must be logged in to place an order.');
+        return;
+      }
+
+      const db = getFirestore();
+      const orderData = {
+        userId: user.uid,
+        cartMeals,
+        totalPrice,
+        deliveryAddress,
         paymentMethod,
-        paymentStatus: paymentMethod === 'cod' ? 'unpaid' : 'pending',
-        createdAt: serverTimestamp(),
+        status: 'pending',
+        placedAt: serverTimestamp(),
       };
 
-      await addDoc(collection(db, 'orders'), order);
+      // ✅ Add GeoPoint only if valid
+      if (
+        location &&
+        typeof location.latitude === 'number' &&
+        typeof location.longitude === 'number'
+      ) {
+        orderData.location = new GeoPoint(location.latitude, location.longitude);
+      }
 
-      Alert.alert('Success', 'Your order has been placed!', [
-        {
-          text: 'OK',
-          onPress: () => navigation.replace('OrderSuccess'),
-        },
-      ]);
+      await addDoc(collection(db, 'orders'), orderData);
+      await AsyncStorage.removeItem(`cart_${user.uid}`);
+      Alert.alert('✅ Order Placed', 'Your order has been saved successfully!');
+      navigation.navigate('MainTabs', { screen: 'Order' });
+
+
     } catch (error) {
       console.error('Error placing order:', error);
-      Alert.alert('Error', 'Failed to place order. Please try again.');
+      Alert.alert('Error', 'Something went wrong while placing your order.');
     }
   };
 
+  const renderItem = ({ item }) => (
+    <View style={styles.itemRow}>
+      <View style={styles.itemLeft}>
+        <Text style={styles.quantityText}>{item.quantity}×</Text>
+        <Text style={styles.mealNameText}>{item.mealName}</Text>
+      </View>
+      <Text style={styles.itemPrice}>₱{(item.quantity * item.price).toFixed(2)}</Text>
+    </View>
+  );
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Confirm Your Order</Text>
+    <View style={styles.container}>
+      <Text style={styles.title}>Order Summary</Text>
+      <Text style={styles.subText}>Please review your order before placing it.</Text>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Items:</Text>
-        {cartItems.length > 0 ? (
-          cartItems.map((item, index) => (
-            <Text key={index} style={styles.itemText}>
-              {item.quantity}x {item.mealName} - ₱
-              {(item.price * item.quantity).toFixed(2)}
-            </Text>
-          ))
-        ) : (
-          <Text style={styles.itemText}>No items in cart.</Text>
-        )}
-        <Text style={styles.totalText}>Total: ₱{totalPrice.toFixed(2)}</Text>
+      <View style={styles.card}>
+        <FlatList
+          data={cartMeals}
+          keyExtractor={(item, index) => index.toString()}
+          renderItem={renderItem}
+          ItemSeparatorComponent={() => <View style={styles.separator} />}
+          ListEmptyComponent={<Text style={styles.emptyText}>Your cart is empty.</Text>}
+        />
+
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>Total</Text>
+          <Text style={styles.totalValue}>₱{totalPrice.toFixed(2)}</Text>
+        </View>
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Delivery Address:</Text>
-        <Text>{deliveryAddress}</Text>
+      <View style={styles.infoCard}>
+        <Text style={styles.infoLabel}>📍 Delivery Address</Text>
+        <Text style={styles.infoText}>{deliveryAddress}</Text>
+
+        <Text style={[styles.infoLabel, { marginTop: 16 }]}>💳 Payment Method</Text>
+        <Text style={styles.infoText}>
+          {paymentMethod.toUpperCase() === 'COD' ? 'Cash on Delivery' : paymentMethod}
+        </Text>
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Payment Method:</Text>
-        <Text style={styles.paymentText}>{paymentMethod.toUpperCase()}</Text>
-      </View>
+      <Text style={styles.confirmNote}>
+        By placing this order, you agree to our terms and cancellation policy.
+      </Text>
 
-      <TouchableOpacity style={styles.button} onPress={handlePlaceOrder}>
-        <Text style={styles.buttonText}>Place Order</Text>
+      <TouchableOpacity style={styles.checkoutButton} onPress={handlePlaceOrder}>
+        <Text style={styles.checkoutButtonText}>Place Order</Text>
       </TouchableOpacity>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flexGrow: 1,
+    flex: 1,
+    backgroundColor: '#fafaf9',
     padding: 20,
-    backgroundColor: '#fefce8',
-    paddingTop: 50,
+    paddingTop: 40,
   },
   title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    marginBottom: 20,
-  },
-  section: {
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontWeight: 'bold',
-    marginBottom: 5,
-  },
-  itemText: {
-    fontSize: 16,
-  },
-  totalText: {
-    marginTop: 10,
-    fontWeight: 'bold',
-    fontSize: 18,
-  },
-  paymentText: {
-    fontSize: 16,
+    fontSize: 26,
+    fontWeight: '700',
     color: '#14532d',
-    fontWeight: '600',
+    marginBottom: 4,
   },
-  button: {
-    backgroundColor: '#14532d',
-    paddingVertical: 14,
-    borderRadius: 8,
+  subText: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 12,
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  itemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 30,
   },
-  buttonText: {
-    color: 'white',
-    fontWeight: 'bold',
+  itemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  quantityText: {
+    fontWeight: '600',
+    marginRight: 8,
+    color: '#1c1917',
+  },
+  mealNameText: {
     fontSize: 16,
+    color: '#1c1917',
+    flexShrink: 1,
+  },
+  itemPrice: {
+    fontWeight: '600',
+    color: '#1c1917',
+  },
+  separator: {
+    height: 1,
+    backgroundColor: '#e5e5e5',
+    marginVertical: 10,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e5e5',
+    paddingTop: 12,
+  },
+  totalLabel: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#14532d',
+  },
+  totalValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#14532d',
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#9ca3af',
+    paddingVertical: 20,
+    fontStyle: 'italic',
+  },
+  infoCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
+    elevation: 2,
+  },
+  infoLabel: {
+    fontWeight: '600',
+    color: '#14532d',
+    fontSize: 14,
+  },
+  infoText: {
+    color: '#444',
+    fontSize: 15,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  confirmNote: {
+    fontSize: 12,
+    color: '#6b7280',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  checkoutButton: {
+    backgroundColor: '#22c55e',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    elevation: 4,
+  },
+  checkoutButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
