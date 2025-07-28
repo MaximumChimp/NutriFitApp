@@ -17,7 +17,7 @@ import {
   SafeAreaView,
   DeviceEventEmitter,
 } from 'react-native';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs,onSnapshot } from 'firebase/firestore';
 import { db } from '@/config/firebase-config';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -35,6 +35,27 @@ import SkeletonPlaceholder from 'react-native-skeleton-placeholder';
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const numColumns = 2;
 const cardWidth = (SCREEN_WIDTH - 48) / numColumns;
+
+
+const reverseGeocodeWithNominatim = async (coords) => {
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${coords.latitude}&lon=${coords.longitude}`,
+      {
+        headers: {
+          'User-Agent': 'NutriFit/1.0 (arvincabrera37@gmail.com)',
+        },
+      }
+    );
+    const data = await response.json();
+    return data.display_name || 'Unknown Address';
+  } catch (e) {
+    console.error('Nominatim reverse geocode error:', e);
+    return 'Unknown Address';
+  }
+};
+
+
 
 export default function OrderScreen() {
   // data / filters
@@ -72,50 +93,87 @@ export default function OrderScreen() {
    * ---------------------------------------------------------------- */
   //Check Connection
   useEffect(() => {
+    let wasDisconnected = false;
+
     const unsubscribe = NetInfo.addEventListener(state => {
-      const connected = state.isConnected && state.isInternetReachable !== false;
+      const connected = !!state.isConnected && state.isInternetReachable !== false;
       setIsConnected(connected);
 
-      if (connected) {
-        // Retry fetching data when internet is back
-        reloadOrderScreenData();
+      if (connected && wasDisconnected) {
+        console.log('🔄 Reconnected, refreshing data...');
+        reloadOrderScreenData(); // refetch meals, location, and cart
       }
+
+      wasDisconnected = !connected;
     });
 
     return () => unsubscribe();
   }, []);
 
-  
-  const reloadOrderScreenData = async () => {
-    setLoading(true);
 
-    try {
-      // Fetch meals again
-      const snapshot = await getDocs(collection(db, 'meals'));
-      const fetchedMeals = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setMeals(fetchedMeals);
-      setFilteredMeals(fetchedMeals);
-    } catch (e) {
-      console.error('Error re-fetching meals:', e);
-    }
 
-    try {
-      // Refresh location
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({});
-        setLocation(loc.coords);
-        setTempLocation(loc.coords);
-        const [addr] = await Location.reverseGeocodeAsync(loc.coords);
-        if (addr) setAddress(formatAddress(addr));
+
+  const toggleAvailability = async (mealId: string, newAvailability: boolean) => {
+      try {
+        const mealRef = doc(db, 'meals', mealId);
+        await updateDoc(mealRef, { available: newAvailability });
+
+        // Update locally in meals and filteredMeals
+        const updateMealList = (list: any[]) =>
+          list.map((meal) =>
+            meal.id === mealId ? { ...meal, available: newAvailability } : meal
+          );
+
+        setMeals((prev) => updateMealList(prev));
+        setFilteredMeals((prev) => updateMealList(prev));
+      } catch (e) {
+        console.error('Failed to toggle availability:', e);
       }
-    } catch (e) {
-      console.warn('Location refresh error:', e);
-    }
-
-    await fetchCart();
-    setLoading(false);
   };
+
+  
+const reloadOrderScreenData = async () => {
+  setLoading(true);
+
+  try {
+    // One-time fetch of meals (no snapshot here)
+    const snapshot = await getDocs(collection(db, 'meals'));
+    const fetchedMeals = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    setMeals(fetchedMeals);
+    setFilteredMeals(fetchedMeals);
+  } catch (e) {
+    console.error('Error re-fetching meals:', e);
+  }
+
+  try {
+    // Refresh location
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status === 'granted') {
+      const loc = await Location.getCurrentPositionAsync({});
+      setLocation(loc.coords);
+      setTempLocation(loc.coords);
+
+      try {
+        const [addr] = await Location.reverseGeocodeAsync(loc.coords);
+        if (addr) {
+          setAddress(formatAddress(addr));
+        } else {
+          const fallback = await reverseGeocodeWithNominatim(loc.coords);
+          setAddress(fallback);
+        }
+      } catch {
+        const fallback = await reverseGeocodeWithNominatim(loc.coords);
+        setAddress(fallback);
+      }
+    }
+  } catch (e) {
+    console.warn('Location refresh error:', e);
+  }
+
+  await fetchCart();
+  setLoading(false);
+};
+
 
 
 
@@ -223,32 +281,50 @@ export default function OrderScreen() {
   /* ------------------------------------------------------------------
    * LOAD MEALS + LOCATION ONCE
    * ---------------------------------------------------------------- */
-  useEffect(() => {
-    (async () => {
-      try {
-        const snapshot = await getDocs(collection(db, 'meals'));
-        const fetchedMeals = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setMeals(fetchedMeals);
-        setFilteredMeals(fetchedMeals);
-      } catch (e) {
-        console.error('Error fetching meals:', e);
-      } finally {
-        setLoading(false);
-      }
+useEffect(() => {
+  const unsubscribeMeals = onSnapshot(collection(db, 'meals'), (snapshot) => {
+    const updatedMeals = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+    setMeals(updatedMeals);
+    setFilteredMeals(updatedMeals);
+  }, (error) => {
+    console.error('Real-time meal sync failed:', error);
+  });
 
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') return;
+  // Fetch location once
+  (async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
         const loc = await Location.getCurrentPositionAsync({});
         setLocation(loc.coords);
         setTempLocation(loc.coords);
-        const [addr] = await Location.reverseGeocodeAsync(loc.coords);
-        if (addr) setAddress(formatAddress(addr));
-      } catch (e) {
-        console.warn('Location error:', e);
+
+        try {
+          const [addr] = await Location.reverseGeocodeAsync(loc.coords);
+          if (addr) {
+            setAddress(formatAddress(addr));
+          } else {
+            const nominatimAddr = await reverseGeocodeWithNominatim(loc.coords);
+            setAddress(nominatimAddr);
+          }
+        } catch {
+          const fallbackAddr = await reverseGeocodeWithNominatim(loc.coords);
+          setAddress(fallbackAddr);
+        }
       }
-    })();
-  }, []);
+    } catch (e) {
+      console.warn('Location fetch error:', e);
+    } finally {
+      setLoading(false);
+    }
+  })();
+
+  return () => unsubscribeMeals(); // cleanup listener
+}, []);
+
 
   /* ------------------------------------------------------------------
    * FILTER MEALS
@@ -320,16 +396,55 @@ export default function OrderScreen() {
   /* ------------------------------------------------------------------
    * RENDER MEAL CARD
    * ---------------------------------------------------------------- */
-  const renderMeal = ({ item }: any) => (
+const renderMeal = ({ item }: any) => {
+  const isUnavailable = item.available === false;
+
+  const handlePress = () => {
+    const mealRef = doc(db, 'meals', item.id);
+    const unsubscribe = onSnapshot(mealRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        alert('Meal not found.');
+        unsubscribe();
+        return;
+      }
+
+      const latestMeal = { id: snapshot.id, ...snapshot.data() };
+
+      if (latestMeal.available === false) {
+        alert('This meal is currently unavailable.');
+        unsubscribe();
+        return;
+      }
+
+      unsubscribe(); // Clean up immediately after getting latest data
+      navigation.navigate('MealDetail', { meal: latestMeal });
+    }, (error) => {
+      console.error('onSnapshot error:', error);
+      alert('Failed to load latest meal info.');
+      unsubscribe();
+    });
+  };
+
+  return (
     <TouchableOpacity
-      style={styles.card}
-      onPress={() => navigation.navigate('MealDetail', { meal: item })}
+      style={[styles.card, isUnavailable && { opacity: 0.5 }]}
+      onPress={handlePress}
+      disabled={isUnavailable}
     >
-      <Image source={{ uri: item.image }} style={styles.image} />
+      <View style={{ position: 'relative', width: '100%' }}>
+        <Image source={{ uri: item.image }} style={styles.image} />
+        {isUnavailable && (
+          <View style={styles.unavailableOverlay}>
+            <Text style={styles.unavailableText}>Unavailable</Text>
+          </View>
+        )}
+      </View>
       <Text style={styles.name}>{item.mealName || 'Unnamed Meal'}</Text>
       <Text style={styles.price}>₱ {item.price?.toFixed(2) || '0.00'}</Text>
     </TouchableOpacity>
   );
+};
+
 
   /* ------------------------------------------------------------------
    * TOTALS
@@ -375,6 +490,8 @@ export default function OrderScreen() {
           <Text style={styles.locationText}>{address}</Text>
         </TouchableOpacity>
       )}
+
+
 
 
       {/* Search + Filter */}
@@ -906,6 +1023,23 @@ skeletonCardPrice: {
   width: '40%',
   borderRadius: 4,
   backgroundColor: '#e5e7eb',
+},
+unavailableOverlay: {
+  position: 'absolute',
+  top: 0,
+  left: 0,
+  width: '100%',
+  height: '100%',
+  backgroundColor: 'rgba(0,0,0,0.4)',
+  justifyContent: 'center',
+  alignItems: 'center',
+  borderRadius: 10,
+},
+unavailableText: {
+  color: '#fff',
+  fontSize: 16,
+  fontWeight: 'bold',
+  textAlign: 'center',
 },
 
 

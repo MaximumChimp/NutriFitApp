@@ -1,5 +1,5 @@
 // SelectLocationScreen.jsx
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState,useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Animated,
 } from 'react-native';
@@ -17,12 +17,24 @@ export default function SelectLocationScreen() {
   const mapRef = useRef(null);
   const navigation = useNavigation();
   const route = useRoute();
+  const slideAnim = useRef(new Animated.Value(-10)).current; // for Y-axis
 
+useEffect(() => {
+  (async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      console.warn('Permission to access location was denied');
+      return;
+    }
+
+    pinMyLocation();
+  })();
+}, []);
   const fetchSuggestions = debounce(async (text) => {
     if (!text) return setSuggestions([]);
     try {
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(text)}`,
+        `https://nominatim.openstreetmap.org/search?format=json&countrycodes=ph&q=${encodeURIComponent(text)}`,
         {
           headers: {
             'User-Agent': 'NutriFit/1.0 (arvincabrera37@gmail.com)',
@@ -32,7 +44,19 @@ export default function SelectLocationScreen() {
       );
       const data = await res.json();
       setSuggestions(data);
-      Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start();
+
     } catch (e) {
       console.error('Nominatim error:', e);
     }
@@ -203,3 +227,4 @@ const styles = StyleSheet.create({
     borderRadius: 15,
   },
 });
+

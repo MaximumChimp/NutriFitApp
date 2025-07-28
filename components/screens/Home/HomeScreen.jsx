@@ -55,53 +55,53 @@ function CircleProgress({ percent = 0, color = "#22c55e", value,target, label })
     strokeDashoffset:
       CIRCUMFERENCE - (CIRCUMFERENCE * animatedProgress.value) / 100,
   }));
-
+  
   return (
     <View style={styles.circleItem}>
-<Svg width={SIZE} height={SIZE}>
-  {/* Outer border ring */}
-  <Circle
-    stroke="#d1fae5" // Light green or any border color
-    fill="none"
-    cx={SIZE / 2}
-    cy={SIZE / 2}
-    r={RADIUS + 2} // Slightly bigger than background/progress
-    strokeWidth={2}
-  />
+      <Svg width={SIZE} height={SIZE}>
+        {/* Outer border ring */}
+        <Circle
+          stroke="#d1fae5" // Light green or any border color
+          fill="none"
+          cx={SIZE / 2}
+          cy={SIZE / 2}
+          r={RADIUS + 2} // Slightly bigger than background/progress
+          strokeWidth={2}
+        />
 
-  {/* Background ring */}
-  <Circle
-    stroke="#e5e7eb"
-    fill="none"
-    cx={SIZE / 2}
-    cy={SIZE / 2}
-    r={RADIUS}
-    strokeWidth={STROKE_WIDTH}
-  />
+        {/* Background ring */}
+        <Circle
+          stroke="#e5e7eb"
+          fill="none"
+          cx={SIZE / 2}
+          cy={SIZE / 2}
+          r={RADIUS}
+          strokeWidth={STROKE_WIDTH}
+        />
 
-  {/* Foreground animated progress ring */}
-  <AnimatedCircle
-    stroke={color}
-    fill="none"
-    cx={SIZE / 2}
-    cy={SIZE / 2}
-    r={RADIUS}
-    strokeWidth={STROKE_WIDTH}
-    strokeDasharray={CIRCUMFERENCE}
-    animatedProps={animatedProps}
-    strokeLinecap="round"
-    rotation="-90"
-    originX={SIZE / 2}
-    originY={SIZE / 2}
-  />
-</Svg>
+        {/* Foreground animated progress ring */}
+        <AnimatedCircle
+          stroke={color}
+          fill="none"
+          cx={SIZE / 2}
+          cy={SIZE / 2}
+          r={RADIUS}
+          strokeWidth={STROKE_WIDTH}
+          strokeDasharray={CIRCUMFERENCE}
+          animatedProps={animatedProps}
+          strokeLinecap="round"
+          rotation="-90"
+          originX={SIZE / 2}
+          originY={SIZE / 2}
+        />
+      </Svg>
 
-     <View style={styles.circleValueContainer}>
+      <View style={styles.circleValueContainer}>
   <Text style={styles.circleValue}>
     {value}/{target}
   </Text>
   <Text style={styles.unit}>kcal</Text>
-</View>
+  </View>
 
       <Text style={styles.circleLabel}>{label}</Text>
     </View>
@@ -132,7 +132,7 @@ export default function HomeScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [lostStreakVisible, setLostStreakVisible] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-
+  const [userData, setUserData] = useState(null);
 const safeCaloriesTarget = tdee || 0;
 const safeCaloriesEaten = caloriesEaten || 0;
 const safeCaloriesBurned = caloriesBurned || 0;
@@ -326,7 +326,7 @@ useEffect(() => {
   setGreeting(
     hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"
   );
-  
+
   const fetchUserData = async () => {
     try {
       const user = auth.currentUser;
@@ -334,17 +334,23 @@ useEffect(() => {
 
       const docRef = doc(db, "users", user.uid);
       const docSnap = await getDoc(docRef);
+
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const tdeeValue = data?.calorieBreakdown?.tdee;
-        setUserName(data.firstName ||data.Name ||"User");
-        setTdee(tdeeValue ?? 2000);
-        setMealsLoading(true);
+        const tdeeValue = data?.calorieBreakdown?.tdee ?? 2000;
+
+        setUserName(data.firstName || data.Name || "User");
+        setTdee(tdeeValue);
+        setUserData(data); // ✅ required to avoid ReferenceError
+        fetchMealSuggestions(tdeeValue); // ✅ call suggestions here
+      } else {
+        console.warn("User document not found");
       }
     } catch (err) {
       console.error("Error fetching user data:", err);
     } finally {
       setLoading(false);
+      setMealsLoading(false); // stop spinner even if error
     }
   };
 
@@ -353,17 +359,60 @@ useEffect(() => {
 
 
 
-const fetchMealSuggestions = async (tdeeValue) => {
-  if (!tdeeValue) return;
+
+const fetchMealSuggestions = async (tdeeValue, userData) => {
+  if (!tdeeValue || !userData) return;
+
   try {
     setMealsLoading(true);
+
     const snapshot = await getDocs(collection(db, "meals"));
     const allMeals = snapshot.docs.map((doc) => doc.data());
-    const validMeals = allMeals.filter(
-      (meal) => meal.calories && meal.calories <= (tdeeValue - 1350)
-    );
+
+    const userAllergies = userData.Allergies || [];
+    const userHealthConditions = userData.HealthConditions || [];
+
+    // Calculate TDEE-based calorie cap
+    const calorieCap = tdeeValue - 1350;
+
+    const validMeals = allMeals.filter((meal) => {
+      const { calories, ingredients = [], tags = [] } = meal;
+
+      // ❌ Reject if calories exceed TDEE threshold
+      if (typeof calories !== 'number' || calories > calorieCap) return false;
+
+      // ❌ Reject if ingredients match any of the user's allergies
+      const hasAllergyConflict = userAllergies.some((allergy) =>
+        ingredients.some((ing) =>
+          ing.toLowerCase().includes(allergy.toLowerCase())
+        )
+      );
+      if (hasAllergyConflict) return false;
+
+      // ❌ Reject if tags match any user health condition (e.g. 'Diabetes')
+      const hasHealthConflict = userHealthConditions.some((condition) =>
+        tags.some((tag) =>
+          tag.toLowerCase().includes(condition.toLowerCase())
+        )
+      );
+      if (hasHealthConflict) return false;
+
+      return true;
+    });
+
+    // Shuffle and take 3
     const shuffled = validMeals.sort(() => 0.5 - Math.random());
-    setSuggestions(shuffled.slice(0, 3));
+    const topSuggestions = shuffled.slice(0, 3);
+
+    // Fallback to random 3 if nothing valid found
+    if (topSuggestions.length === 0 && allMeals.length > 0) {
+      console.warn("No filtered meals found — showing fallback meals");
+      const fallback = allMeals.sort(() => 0.5 - Math.random()).slice(0, 3);
+      setSuggestions(fallback);
+    } else {
+      setSuggestions(topSuggestions);
+    }
+
   } catch (err) {
     console.error("Failed to fetch meals:", err);
   } finally {
@@ -371,12 +420,21 @@ const fetchMealSuggestions = async (tdeeValue) => {
   }
 };
 
+
 useEffect(() => {
   if (tdee) {
     fetchMealSuggestions(tdee);
   }
 }, [selectedDate, tdee]);
 
+useEffect(() => {
+  if (userData) {
+    console.log("✅ userData loaded:", userData);
+    fetchMealSuggestions(userData);
+  } else {
+    console.log("⏳ Waiting for userData...");
+  }
+}, [userData]);
 
 useEffect(() => {
   if (showSidebar) {
@@ -391,10 +449,11 @@ useEffect(() => {
 
   
 useEffect(() => {
-  if (tdee) {
-    loadLocalMealsForDate(selectedDate);
+  if (tdee && userData) {
+    fetchMealSuggestions(tdee, userData);
   }
-}, [selectedDate, tdee]);
+}, [tdee, userData, selectedDate]);
+
 
 
 const animatedSidebarStyle = useAnimatedStyle(() => ({
