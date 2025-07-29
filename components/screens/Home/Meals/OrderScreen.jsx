@@ -17,7 +17,7 @@ import {
   SafeAreaView,
   DeviceEventEmitter,
 } from 'react-native';
-import { collection, getDocs,onSnapshot } from 'firebase/firestore';
+import { collection, getDocs,onSnapshot,doc} from 'firebase/firestore';
 import { db } from '@/config/firebase-config';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';

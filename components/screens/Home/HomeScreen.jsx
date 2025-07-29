@@ -25,7 +25,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import { auth, db } from "@/config/firebase-config";
-import { doc, getDoc, collection,query,orderBy, getDocs,addDoc} from "firebase/firestore";
+import { doc, getDoc, collection,query,orderBy, getDocs,addDoc,onSnapshot} from "firebase/firestore";
 import { Dimensions } from "react-native";
 const screenWidth = Dimensions.get("window").width;
 const CARD_WIDTH = screenWidth - 48;
@@ -48,6 +48,7 @@ function CircleProgress({ percent = 0, color = "#22c55e", value,target, label })
   const animatedProgress = useSharedValue(0);
 
   useEffect(() => {
+    animatedProgress.value = 0; // reset on mount
     animatedProgress.value = withTiming(percent, { duration: 1000 });
   }, [percent]);
 
@@ -156,6 +157,22 @@ const percentBurned = safeCaloriesTarget > 0
 const macros = macrosPercent;
 
 useEffect(() => {
+  const autoRefresh = async () => {
+    try {
+      await fetchMealSuggestions(tdee);
+      await loadLocalMealsForDate(selectedDate);
+    } catch (err) {
+      console.error("Auto refresh failed", err);
+    }
+  };
+
+  if (tdee && selectedDate) {
+    autoRefresh(); // only run when both are defined
+  }
+}, [tdee, selectedDate]); // run when these change
+
+
+useEffect(() => {
   const unsubscribe = NetInfo.addEventListener(state => {
     const connected = state.isConnected && state.isInternetReachable !== false;
     setIsConnected(connected);
@@ -181,9 +198,6 @@ const onRefresh = async () => {
     setRefreshing(false);
   }
 };
-
-
-
 
 
 const loadLocalMealsForDate = async (date) => {
@@ -360,39 +374,33 @@ useEffect(() => {
 
 
 
+const normalize = (str) => str.trim().toLowerCase();
+
 const fetchMealSuggestions = async (tdeeValue, userData) => {
-  if (!tdeeValue || !userData) return;
+  if (!tdeeValue || !userData) return () => {};
 
-  try {
-    setMealsLoading(true);
-
-    const snapshot = await getDocs(collection(db, "meals"));
+  const unsub = onSnapshot(collection(db, "meals"), (snapshot) => {
     const allMeals = snapshot.docs.map((doc) => doc.data());
 
     const userAllergies = userData.Allergies || [];
     const userHealthConditions = userData.HealthConditions || [];
-
-    // Calculate TDEE-based calorie cap
     const calorieCap = tdeeValue - 1350;
 
     const validMeals = allMeals.filter((meal) => {
       const { calories, ingredients = [], tags = [] } = meal;
 
-      // ❌ Reject if calories exceed TDEE threshold
-      if (typeof calories !== 'number' || calories > calorieCap) return false;
+      if (typeof calories !== "number" || calories > calorieCap) return false;
 
-      // ❌ Reject if ingredients match any of the user's allergies
       const hasAllergyConflict = userAllergies.some((allergy) =>
         ingredients.some((ing) =>
-          ing.toLowerCase().includes(allergy.toLowerCase())
+          new RegExp(`\\b${allergy}\\b`, "i").test(ing)
         )
       );
       if (hasAllergyConflict) return false;
 
-      // ❌ Reject if tags match any user health condition (e.g. 'Diabetes')
       const hasHealthConflict = userHealthConditions.some((condition) =>
         tags.some((tag) =>
-          tag.toLowerCase().includes(condition.toLowerCase())
+          new RegExp(`\\b${condition}\\b`, "i").test(tag)
         )
       );
       if (hasHealthConflict) return false;
@@ -400,11 +408,9 @@ const fetchMealSuggestions = async (tdeeValue, userData) => {
       return true;
     });
 
-    // Shuffle and take 3
     const shuffled = validMeals.sort(() => 0.5 - Math.random());
     const topSuggestions = shuffled.slice(0, 3);
 
-    // Fallback to random 3 if nothing valid found
     if (topSuggestions.length === 0 && allMeals.length > 0) {
       console.warn("No filtered meals found — showing fallback meals");
       const fallback = allMeals.sort(() => 0.5 - Math.random()).slice(0, 3);
@@ -413,11 +419,13 @@ const fetchMealSuggestions = async (tdeeValue, userData) => {
       setSuggestions(topSuggestions);
     }
 
-  } catch (err) {
-    console.error("Failed to fetch meals:", err);
-  } finally {
     setMealsLoading(false);
-  }
+  }, (error) => {
+    console.error("Real-time meal suggestion error:", error);
+    setMealsLoading(false);
+  });
+
+  return unsub; 
 };
 
 
@@ -647,7 +655,7 @@ return (
 
       {/* Circles */}
       <Animated.View entering={FadeIn.duration(400)} style={styles.circleRow}>
-        {mealsLoading ? (
+        {mealsLoading || !tdee ? (
           <>
             <CircleSkeleton />
             <CircleSkeleton />
@@ -745,48 +753,82 @@ return (
               contentContainerStyle={{ paddingBottom: 20 }}
             >
               {suggestions.map((meal, index) => {
-                const isExpanded = expandedIndex === index;
-                return (
-                  <TouchableOpacity
-                    key={index}
-                    style={[styles.suggestionItemHorizontal, { width: CARD_WIDTH }]}
-                    activeOpacity={0.9}
-                    onPress={() => setExpandedIndex(isExpanded ? null : index)}
-                  >
-                    {meal.image && (
-                      <View style={styles.imageContainer}>
-                        <Image
-                          source={{ uri: meal.image }}
-                          style={styles.suggestionImage}
-                        />
-                      </View>
-                    )}
-                    <View style={styles.suggestionText}>
-                      <View style={styles.suggestionTopRow}>
-                        <Text style={styles.suggestionName}>{meal.mealName}</Text>
-                        <Ionicons name="star-outline" size={20} color="#facc15" />
-                      </View>
-                      <Text style={styles.suggestionCalories}>
-                        {meal.calories ?? 0} kcal
-                      </Text>
-                      {meal.description && (
-                        <Text
-                          style={[
-                            styles.suggestionDescription,
-                            !isExpanded && styles.suggestionDescriptionCollapsed,
-                          ]}
-                          numberOfLines={isExpanded ? undefined : 2}
-                        >
-                          {meal.description}
-                        </Text>
-                      )}
-                      <TouchableOpacity style={styles.logButton}>
-                        <Text style={styles.logButtonText}>Add Meal</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+  const isExpanded = expandedIndex === index;
+  const isUnavailable = meal.available === false;
+
+  return (
+    <TouchableOpacity
+      key={index}
+      style={[
+        styles.suggestionItemHorizontal,
+        { width: CARD_WIDTH },
+        isUnavailable && styles.unavailableCard,
+      ]}
+      activeOpacity={isUnavailable ? 1 : 0.9}
+      onPress={() => {
+        if (!isUnavailable) {
+          setExpandedIndex(isExpanded ? null : index);
+        }
+      }}
+    >
+      {meal.image && (
+        <View style={styles.imageContainer}>
+          <Image
+            source={{ uri: meal.image }}
+            style={[
+              styles.suggestionImage,
+              isUnavailable && { opacity: 0.5 }
+            ]}
+          />
+        </View>
+      )}
+      <View style={styles.suggestionText}>
+        <View style={styles.suggestionTopRow}>
+          <Text
+            style={[
+              styles.suggestionName,
+              isUnavailable && styles.unavailableText
+            ]}
+          >
+            {meal.mealName}
+          </Text>
+          <Ionicons name="star-outline" size={20} color="#facc15" />
+        </View>
+
+        <Text
+          style={[
+            styles.suggestionCalories,
+            isUnavailable && styles.unavailableText
+          ]}
+        >
+          {meal.calories ?? 0} kcal
+        </Text>
+
+        {meal.description && (
+          <Text
+            style={[
+              styles.suggestionDescription,
+              !isExpanded && styles.suggestionDescriptionCollapsed,
+              isUnavailable && styles.unavailableText
+            ]}
+            numberOfLines={isExpanded ? undefined : 2}
+          >
+            {meal.description}
+          </Text>
+        )}
+
+        {isUnavailable ? (
+          <Text style={styles.unavailableLabel}>Unavailable</Text>
+        ) : (
+          <TouchableOpacity style={styles.logButton}>
+            <Text style={styles.logButtonText}>Add to Cart</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+})}
+
             </ScrollView>
           </View>
         ) : (
@@ -1244,5 +1286,32 @@ macroSkeletonValue: {
   borderRadius: 4,
   backgroundColor: "#e5e7eb",
 },
+unavailableCard: {
+  backgroundColor: "#D3D3D3",
+  opacity: 0.6,
+},
+
+unavailableText: {
+  color: "#888",
+},
+
+unavailableLabel: {
+  position: 'absolute',
+  top: '50%',
+  left: '50%',
+  transform: [{ translateX: -100 }, { translateY: -15 }], // adjust for longer text
+  color: '#ffffff',
+  fontWeight: 'bold',
+  fontSize: 17.7,
+  paddingVertical: 8,
+  paddingHorizontal: 16,
+  borderRadius: 10,
+  textAlign: 'center',
+  maxWidth: 200,  // limit width for readability
+  overflow: 'hidden',
+  zIndex: 2,
+},
+
+
 
 });
