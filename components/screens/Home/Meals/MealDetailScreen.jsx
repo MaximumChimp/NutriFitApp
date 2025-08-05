@@ -260,7 +260,7 @@ const renderSkeletonCard = (_, index) => (
 
       <Text
         style={styles.description}
-        numberOfLines={showFullDescription ? undefined : 3}
+        numberOfLines={showFullDescription ? undefined : 2}
         ellipsizeMode="tail"
       >
         {meal.description || 'No description available.'}

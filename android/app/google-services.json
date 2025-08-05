@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "443385573457",
+    "project_id": "nutrifit-d98f5",
+    "storage_bucket": "nutrifit-d98f5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:443385573457:android:215f2084e38825a4af8870",
+        "android_client_info": {
+          "package_name": "com.maximumchimp.NutriFit"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "443385573457-j1k8fqfh260etj8v1g318vkcldv60bep.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCKAGHyNnOgxeWMeQjaAIYdLSn5P_tzwes"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "443385573457-j1k8fqfh260etj8v1g318vkcldv60bep.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

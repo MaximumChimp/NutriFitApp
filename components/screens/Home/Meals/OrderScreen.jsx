@@ -20,7 +20,6 @@ import {
 import { collection, getDocs,onSnapshot,doc} from 'firebase/firestore';
 import { db } from '@/config/firebase-config';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import MapView, { Marker } from 'react-native-maps';
 import debounce from 'lodash.debounce';
 import { useNavigation, useStateForPath } from '@react-navigation/native';
@@ -30,6 +29,7 @@ import NetInfo from '@react-native-community/netinfo';
 import NoInternetScreen from './NoInternetScreen';
 import { LinearGradient } from 'expo-linear-gradient';
 import SkeletonPlaceholder from 'react-native-skeleton-placeholder';
+import { requestAndFetchLocation } from '../../../Helper/RequestAndFetch';
 
 // layout constants
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -87,6 +87,13 @@ export default function OrderScreen() {
   const [isConnected, setIsConnected] = useState(true);
 
   const navigation = useNavigation();
+useEffect(() => {
+  const fetch = async () => {
+    const location = await requestAndFetchLocation();
+    console.log('Fetched location:', location);
+  };
+  fetch();
+}, []);
 
   /* ------------------------------------------------------------------
    * CART HELPERS
@@ -110,15 +117,6 @@ export default function OrderScreen() {
     return () => unsubscribe();
   }, []);
 
-
-  useEffect(() => {
-    const subscription = DeviceEventEmitter.addListener('locationSelected', ({ coords, address }) => {
-      setLocation(coords);
-      setAddress(address);
-    });
-
-    return () => subscription.remove();
-  }, []);
 
 
 
@@ -156,25 +154,37 @@ const reloadOrderScreenData = async () => {
 
   try {
     // Refresh location
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status === 'granted') {
-      const loc = await Location.getCurrentPositionAsync({});
-      setLocation(loc.coords);
-      setTempLocation(loc.coords);
+      const position = await requestAndFetchLocation();
+      if (!position) {
+        console.warn('Location fetch failed');
+        return;
+      }
+
+      const coords = position.coords;
+      const address = await reverseGeocodeWithNominatim(coords.latitude, coords.longitude);
+
+      // Set location
+      setLocation({
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        label: address?.display_name || 'Unknown location',
+      });
 
       try {
-        const [addr] = await Location.reverseGeocodeAsync(loc.coords);
+        const [addr] = await Location.reverseGeocodeAsync(coords);
+
         if (addr) {
           setAddress(formatAddress(addr));
         } else {
-          const fallback = await reverseGeocodeWithNominatim(loc.coords);
+         const fallback = await reverseGeocodeWithNominatim(coords.latitude, coords.longitude);
+
           setAddress(fallback);
         }
       } catch {
-        const fallback = await reverseGeocodeWithNominatim(loc.coords);
+       const fallback = await reverseGeocodeWithNominatim(coords.latitude, coords.longitude);
+
         setAddress(fallback);
       }
-    }
   } catch (e) {
     console.warn('Location refresh error:', e);
   }
@@ -305,25 +315,36 @@ useEffect(() => {
   // Fetch location once
   (async () => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({});
-        setLocation(loc.coords);
-        setTempLocation(loc.coords);
+        const position = await requestAndFetchLocation();
+        if (!position) {
+          console.warn('Location fetch failed');
+          return;
+        }
+
+        const coords = position.coords;
+        const address = await reverseGeocodeWithNominatim(coords.latitude, coords.longitude);
+
+        // Set location
+        setLocation({
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          label: address?.display_name || 'Unknown location',
+        });
 
         try {
-          const [addr] = await Location.reverseGeocodeAsync(loc.coords);
+          const [addr] = await Location.reverseGeocodeAsync(coords);
+
           if (addr) {
             setAddress(formatAddress(addr));
           } else {
-            const nominatimAddr = await reverseGeocodeWithNominatim(loc.coords);
+            const nominatimAddr = await reverseGeocodeWithNominatim(coords.latitude, coords.longitude);
             setAddress(nominatimAddr);
           }
         } catch {
-          const fallbackAddr = await reverseGeocodeWithNominatim(loc.coords);
-          setAddress(fallbackAddr);
+         const fallback = await reverseGeocodeWithNominatim(coords.latitude, coords.longitude);
+
+          setAddress(fallback);
         }
-      }
     } catch (e) {
       console.warn('Location fetch error:', e);
     } finally {
@@ -607,8 +628,9 @@ const renderMeal = ({ item }: any) => {
             <TouchableOpacity
               style={styles.pinMyLocation}
               onPress={async () => {
-                const loc = await Location.getCurrentPositionAsync({});
-                const coords = loc.coords;
+                const pos = await requestAndFetchLocation();
+                if (!pos) return;
+                const coords = pos.coords;
                 setTempLocation(coords);
                 setLocationQuery('');
                 setSuggestions([]);
@@ -617,6 +639,7 @@ const renderMeal = ({ item }: any) => {
                   1000
                 );
               }}
+
             >
               <Ionicons name="locate-outline" size={18} color="#10b981" />
               <Text style={styles.pinText}>Pin My Location</Text>
