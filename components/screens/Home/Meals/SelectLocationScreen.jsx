@@ -1,230 +1,330 @@
-// SelectLocationScreen.jsx
-import React, { useRef, useState,useEffect } from 'react';
+import React, { useEffect, useRef, useState } from "react";
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView, StyleSheet, Animated,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import MapView, { Marker } from 'react-native-maps';
-import * as Location from 'expo-location';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import debounce from 'lodash.debounce';
+  View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  ActivityIndicator,
+  Animated,
+  DeviceEventEmitter,
+} from "react-native";
+import MapView, { Marker } from "react-native-maps";
+import * as Location from "expo-location";
+import { Ionicons } from "@expo/vector-icons";
+import debounce from "lodash.debounce";
+import { useNavigation, useRoute } from "@react-navigation/native";
 
-export default function SelectLocationScreen() {
-  const [query, setQuery] = useState('');
-  const [suggestions, setSuggestions] = useState([]);
-  const [coords, setCoords] = useState(null);
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const mapRef = useRef(null);
+const SelectLocationScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
-  const slideAnim = useRef(new Animated.Value(-10)).current; // for Y-axis
+  const mapRef = useRef(null);
+  const [coords, setCoords] = useState(null);
+  const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [mapLoading, setMapLoading] = useState(true);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const pinAnim = useRef(new Animated.Value(0)).current;
 
-useEffect(() => {
-  (async () => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      console.warn('Permission to access location was denied');
-      return;
+  const animatePin = () => {
+    pinAnim.setValue(0);
+    Animated.spring(pinAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      friction: 4,
+      tension: 80,
+    }).start();
+  };
+
+  const pinMyLocation = async () => {
+    setLoading(true);
+    try {
+      const loc = await Location.getCurrentPositionAsync({});
+      setCoords(loc.coords);
+      animatePin();
+      mapRef.current?.animateToRegion(
+        {
+          ...loc.coords,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        },
+        1000
+      );
+      await reverseGeocode(loc.coords); // Update address input
+    } catch (err) {
+      alert("Failed to get location.");
     }
+    setLoading(false);
+  };
 
-    pinMyLocation();
-  })();
-}, []);
-  const fetchSuggestions = debounce(async (text) => {
+  const reverseGeocode = async (location) => {
+    try {
+      setSearchLoading(true);
+      const [addr] = await Location.reverseGeocodeAsync(location);
+      const parts = [
+        addr.name,
+        addr.street,
+        addr.subregion,
+        addr.city || addr.district,
+        addr.region,
+        addr.postalCode,
+        addr.country,
+      ];
+      const formattedAddress = parts.filter(Boolean).join(", ");
+      setQuery(formattedAddress);
+    } catch (error) {
+      console.warn("Reverse geocode failed:", error);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const search = debounce(async (text) => {
     if (!text) return setSuggestions([]);
     try {
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&countrycodes=ph&q=${encodeURIComponent(text)}`,
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
+          text
+        )}&countrycodes=ph&format=json`,
         {
           headers: {
-            'User-Agent': 'NutriFit/1.0 (arvincabrera37@gmail.com)',
-            Accept: 'application/json',
+            "User-Agent": "ReactNativeMealApp/1.0 (arvincabrera37@gmail.com)",
           },
         }
       );
       const data = await res.json();
       setSuggestions(data);
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-
-    } catch (e) {
-      console.error('Nominatim error:', e);
+    } catch (err) {
+      console.error("Search error:", err);
     }
   }, 500);
 
-  const pinMyLocation = async () => {
-    const loc = await Location.getCurrentPositionAsync({});
-    setCoords(loc.coords);
-    mapRef.current?.animateToRegion({
-      ...loc.coords,
-      latitudeDelta: 0.01,
-      longitudeDelta: 0.01,
-    }, 1000);
+  const confirm = async () => {
+    if (!coords) return;
+
+    try {
+      const [addr] = await Location.reverseGeocodeAsync(coords);
+      const parts = [
+        addr.name,
+        addr.street,
+        addr.subregion,
+        addr.city || addr.district,
+        addr.region,
+        addr.postalCode,
+        addr.country,
+      ];
+      const formattedAddress = parts.filter(Boolean).join(", ");
+      const selectedCoords = coords;
+
+      DeviceEventEmitter.emit("locationSelected", {
+        coords: selectedCoords,
+        address: formattedAddress,
+      });
+
+      const callback = route.params?.onLocationSelected;
+      if (callback) {
+        callback(selectedCoords, formattedAddress);
+      }
+
+      navigation.goBack();
+    } catch (error) {
+      console.warn("Failed to reverse geocode:", error);
+    }
   };
 
-const confirm = async () => {
-  if (!coords) return;
+  useEffect(() => {
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        alert("Permission to access location was denied.");
+        return;
+      }
+      pinMyLocation();
+    })();
+  }, []);
 
-  try {
-    const [addr] = await Location.reverseGeocodeAsync(coords);
-
-    const parts = [
-      addr.name,
-      addr.street,
-      addr.subregion,
-      addr.city || addr.district,
-      addr.region,
-      addr.postalCode,
-      addr.country,
-    ];
-
-    const formatted = parts.filter(Boolean).join(', ');
-
-    const callback = route.params?.onLocationSelected;
-    if (callback) {
-      callback(coords, formatted);
-    }
-
-    navigation.goBack();
-  } catch (error) {
-    console.warn('Failed to reverse geocode location:', error);
-  }
-};
-
+  useEffect(() => {
+    search(query);
+  }, [query]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#fff', paddingHorizontal: 0, paddingBottom: 20 }}>
-      <View style={styles.searchContainer}>
-        <View style={styles.inputWrapper}>
-          <Ionicons name="search-outline" size={18} color="#6b7280" style={{ marginRight: 8 }} />
-          <TextInput
-            placeholder="Search address..."
-            value={query}
-            onChangeText={(text) => {
-              setQuery(text);
-              fetchSuggestions(text);
+    <View style={{ flex: 1 }}>
+      {/* Map View */}
+      <MapView
+        ref={mapRef}
+        style={{ flex: 1 }}
+        region={{
+          latitude: coords?.latitude || 14.5995,
+          longitude: coords?.longitude || 120.9842,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        }}
+        onPress={(e) => {
+          const loc = e.nativeEvent.coordinate;
+          setCoords(loc);
+          animatePin();
+          reverseGeocode(loc);
+        }}
+        onRegionChange={() => setMapLoading(true)}
+        onRegionChangeComplete={() => setMapLoading(false)}
+      >
+        {coords && (
+          <Marker
+            coordinate={coords}
+            draggable
+            onDragEnd={(e) => {
+              const loc = e.nativeEvent.coordinate;
+              setCoords(loc);
+              reverseGeocode(loc);
             }}
-            placeholderTextColor="#6b7280"
-            style={{ flex: 1, fontSize: 16, color: '#111827' }}
+          >
+            <Animated.View
+              style={{
+                transform: [
+                  {
+                    scale: pinAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [1.5, 1],
+                    }),
+                  },
+                  {
+                    translateY: pinAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-20, 0],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <Ionicons name="location-sharp" size={38} color="#10b981" />
+            </Animated.View>
+          </Marker>
+        )}
+      </MapView>
+
+      {/* Map Loading Spinner */}
+      {mapLoading && (
+        <View
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "50%",
+            marginLeft: -15,
+            marginTop: -15,
+            zIndex: 10,
+          }}
+        >
+          <ActivityIndicator size="large" color="#10b981" />
+        </View>
+      )}
+
+      {/* Search Input & Suggestions */}
+      <View style={{ position: "absolute", top: 40, left: 0, right: 0, paddingHorizontal: 10 }}>
+        <View
+          style={{
+            backgroundColor: "white",
+            borderRadius: 10,
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: 10,
+            marginBottom: 5,
+          }}
+        >
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search location..."
+            style={{ flex: 1, paddingVertical: 12, fontSize: 16 }}
           />
+          {searchLoading ? (
+            <ActivityIndicator size="small" color="#10b981" />
+          ) : query.length > 0 ? (
+            <TouchableOpacity onPress={() => setQuery("")}>
+              <Ionicons name="close" size={20} color="#999" />
+            </TouchableOpacity>
+          ) : null}
         </View>
 
         {suggestions.length > 0 && (
-          <Animated.View style={{ opacity: fadeAnim }}>
-            <ScrollView style={{ maxHeight: 180 }}>
-              {suggestions.map((item, i) => (
-                <TouchableOpacity
-                  key={i}
-                  onPress={() => {
-                    const selected = {
-                      latitude: parseFloat(item.lat),
-                      longitude: parseFloat(item.lon),
-                    };
-                    setCoords(selected);
-                    setQuery(item.display_name);
-                    setSuggestions([]);
-
-                    mapRef.current?.animateToRegion({
+          <ScrollView
+            style={{ maxHeight: 200, backgroundColor: "white", borderRadius: 10 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            {suggestions.map((item, index) => (
+              <TouchableOpacity
+                key={index}
+                onPress={() => {
+                  const selected = {
+                    latitude: parseFloat(item.lat),
+                    longitude: parseFloat(item.lon),
+                  };
+                  setCoords(selected);
+                  animatePin();
+                  setQuery(item.display_name);
+                  setSuggestions([]);
+                  mapRef.current?.animateToRegion(
+                    {
                       ...selected,
                       latitudeDelta: 0.01,
                       longitudeDelta: 0.01,
-                    }, 1000);
-                  }}
-                  style={{
-                    padding: 12,
-                    borderBottomColor: '#e5e7eb',
-                    borderBottomWidth: 1,
-                  }}
-                >
-                  <Text style={{ color: '#111827' }}>{item.display_name}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </Animated.View>
+                    },
+                    1000
+                  );
+                }}
+                style={{
+                  padding: 10,
+                  borderBottomWidth: 1,
+                  borderColor: "#eee",
+                }}
+              >
+                <Text>{item.display_name}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
         )}
-
-        <TouchableOpacity onPress={pinMyLocation} style={styles.pinMyLocation}>
-          <Ionicons name="locate-outline" size={18} color="#10b981" />
-          <Text style={styles.pinText}>Pin My Location</Text>
-        </TouchableOpacity>
       </View>
 
-     <MapView
-  ref={mapRef}
-  style={{ flex: 1 }}
-  region={{
-    latitude: coords?.latitude || 14.5995, // Manila fallback
-    longitude: coords?.longitude || 120.9842,
-    latitudeDelta: 0.01,
-    longitudeDelta: 0.01,
-  }}
-  onPress={(e) => setCoords(e.nativeEvent.coordinate)}
->
-  {coords && (
-    <Marker
-      draggable
-      coordinate={coords}
-      onDragEnd={(e) => setCoords(e.nativeEvent.coordinate)}
-    />
-  )}
-</MapView>
-        <View style={{ paddingHorizontal: 15, marginTop: 10 }}>
-        <TouchableOpacity style={styles.confirmButton} onPress={confirm}>
-            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Confirm Location</Text>
-        </TouchableOpacity>
-        </View>
+      {/* Pin My Location Button */}
+      <TouchableOpacity
+        onPress={pinMyLocation}
+        style={{
+          position: "absolute",
+          bottom: 100,
+          right: 20,
+          backgroundColor: "white",
+          padding: 12,
+          borderRadius: 50,
+          elevation: 5,
+        }}
+      >
+        {loading ? (
+          <ActivityIndicator color="#10b981" />
+        ) : (
+          <Ionicons name="locate" size={24} color="#10b981" />
+        )}
+      </TouchableOpacity>
+
+      {/* Confirm Button */}
+      <TouchableOpacity
+        onPress={confirm}
+        style={{
+          position: "absolute",
+          bottom: 30,
+          left: 20,
+          right: 20,
+          backgroundColor: "#10b981",
+          padding: 15,
+          borderRadius: 10,
+          alignItems: "center",
+        }}
+      >
+        <Text style={{ color: "white", fontSize: 16, fontWeight: "600" }}>
+          Confirm Location
+        </Text>
+      </TouchableOpacity>
     </View>
   );
-}
+};
 
-const styles = StyleSheet.create({
-  searchContainer: {
-    padding:15,
-    paddingTop: 50,
-    
-    backgroundColor: '#fff',
-    gap: 8,
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f3f4f6',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    height: 44,
-  },
-  pinMyLocation: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: '#ecfdf5',
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#10b981',
-  },
-  pinText: {
-    color: '#065f46',
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  confirmButton: {
-    backgroundColor: '#22c55e',
-    padding: 16,
-    paddingHorizontal:15,
-    alignItems: 'center',
-    borderRadius: 15,
-  },
-});
-
+export default SelectLocationScreen;

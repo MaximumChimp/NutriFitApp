@@ -111,6 +111,15 @@ export default function OrderScreen() {
   }, []);
 
 
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('locationSelected', ({ coords, address }) => {
+      setLocation(coords);
+      setAddress(address);
+    });
+
+    return () => subscription.remove();
+  }, []);
+
 
 
   const toggleAvailability = async (mealId: string, newAvailability: boolean) => {
@@ -476,14 +485,7 @@ const renderMeal = ({ item }: any) => {
         </View>
       ) : !!address && (
         <TouchableOpacity
-          onPress={() =>
-            navigation.navigate('SelectLocation', {
-              onLocationSelected: (selectedLocation: any, selectedAddress: string) => {
-                setLocation(selectedLocation);
-                setAddress(selectedAddress);
-              },
-            })
-          }
+          onPress={() => navigation.navigate('SelectLocation')}
           style={styles.locationContainer}
         >
           <Ionicons name="location-outline" size={18} color="#14532d" />
