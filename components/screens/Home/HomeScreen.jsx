@@ -25,7 +25,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import { auth, db } from "@/config/firebase-config";
-import { doc, getDoc, collection,query,orderBy, getDocs,addDoc,onSnapshot} from "firebase/firestore";
+import { doc, getDoc, collection,query,orderBy, where,Timestamp, getDocs,addDoc,onSnapshot} from "firebase/firestore";
 import { Dimensions } from "react-native";
 const screenWidth = Dimensions.get("window").width;
 const CARD_WIDTH = screenWidth - 48;
@@ -36,6 +36,8 @@ import moment from 'moment';
 import { useMealUpdate } from "../../context/MealUpdateContext";
 import NetInfo from '@react-native-community/netinfo';
 import LostStreakScreen from "./LostStreakScreen";
+import { getSmartSuggestions } from "../../Helper/Suggestions";
+
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 
@@ -200,6 +202,8 @@ const onRefresh = async () => {
 };
 
 
+
+
 const loadLocalMealsForDate = async (date) => {
   const user = auth.currentUser;
   if (!user) return;
@@ -270,12 +274,7 @@ useFocusEffect(
         const today = moment().utcOffset(8).startOf('day');
 
 
-        console.log('✅ Checking streak...');
-        console.log('Today:', today);
-        console.log(lastLoggedDate)
-
         if (lastLoggedDate.isAfter(today)) {
-          //console.log('⚠️ lastLoggedDate is in the future, ignoring.');
           return;
         }
 
@@ -294,25 +293,19 @@ useFocusEffect(
           if (streakCount > longestStreak) {
             longestStreak = streakCount;
             await AsyncStorage.setItem('longestStreak', String(longestStreak));
-           // console.log('🏆 New longest streak:', longestStreak);
           }
 
-          console.log('✅ Streak maintained. Current streak:', streakCount);
           setLostStreakVisible(false);
 
         } else if (daysSinceLastLogged === 0) {
-          // Logged again today — keep streak as is
-         // console.log('📅 Already logged today. Streak count unchanged:', streakCount);
           setLostStreakVisible(false);
 
         } else if (daysSinceLastLogged > 1) {
           // Missed a day — streak lost
           if (!alreadyShown) {
-            console.log('🔥 Missed day. Streak broken!');
             setLostStreakVisible(true);
             await AsyncStorage.setItem(hasShownKey, 'true');
           } else {
-           // console.log('ℹ️ Lost streak already shown today.');
           }
 
           // Reset current streak
@@ -373,60 +366,152 @@ useEffect(() => {
 
 
 
+const fetchMealSuggestions = async (userData) => {
+  if (!userData?.requiredCalories || !userData?.uid) return () => {};
 
-const normalize = (str) => str.trim().toLowerCase();
+  // Step 1: Calculate remaining calories
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date();
+  endOfDay.setHours(23, 59, 59, 999);
 
-const fetchMealSuggestions = async (tdeeValue, userData) => {
-  if (!tdeeValue || !userData) return () => {};
+  const q = query(
+    collection(db, `users/${userData.uid}/meals`),
+    where("timestamp", ">=", Timestamp.fromDate(startOfDay)),
+    where("timestamp", "<=", Timestamp.fromDate(endOfDay))
+  );
 
-  const unsub = onSnapshot(collection(db, "meals"), (snapshot) => {
-    const allMeals = snapshot.docs.map((doc) => doc.data());
+  const snapshot = await getDocs(q);
+  const mealsToday = snapshot.docs.map((doc) => doc.data());
+  const totalCalories = mealsToday.reduce(
+    (sum, meal) => sum + (meal.calories || 0),
+    0
+  );
+  const remainingCalories = Math.max(100, userData.requiredCalories - totalCalories);
+  console.log("✅ Remaining calories:", remainingCalories);
 
-    const userAllergies = userData.Allergies || [];
-    const userHealthConditions = userData.HealthConditions || [];
-    const calorieCap = tdeeValue - 1350;
+  // Step 2: Start meal suggestions listener
+  const unsub = onSnapshot(
+    collection(db, "meals"),
+    (snapshot) => {
+      const allMeals = snapshot.docs.map((doc) => doc.data());
 
-    const validMeals = allMeals.filter((meal) => {
-      const { calories, ingredients = [], tags = [] } = meal;
+      const userAllergies = [
+        ...(userData.Allergies || []),
+        ...(userData.OtherAllergy?.trim() ? [userData.OtherAllergy] : [])
+      ];
 
-      if (typeof calories !== "number" || calories > calorieCap) return false;
+      const userHealthConditions = [
+        ...(userData.HealthConditions || []),
+        ...(userData.OtherHealthCondition?.trim() ? [userData.OtherHealthCondition] : [])
+      ];
 
-      const hasAllergyConflict = userAllergies.some((allergy) =>
-        ingredients.some((ing) =>
-          new RegExp(`\\b${allergy}\\b`, "i").test(ing)
-        )
-      );
-      if (hasAllergyConflict) return false;
 
-      const hasHealthConflict = userHealthConditions.some((condition) =>
-        tags.some((tag) =>
-          new RegExp(`\\b${condition}\\b`, "i").test(tag)
-        )
-      );
-      if (hasHealthConflict) return false;
+      const validMeals = allMeals.filter((meal) => {
+        const {
+          mealName = "Unnamed Meal",
+          calories,
+          ingredients = [],
+          tags = [],
+        } = meal;
 
-      return true;
-    });
+        if (typeof calories !== "number" || calories > remainingCalories)
+          return false;
 
-    const shuffled = validMeals.sort(() => 0.5 - Math.random());
-    const topSuggestions = shuffled.slice(0, 3);
+        const normalizedIngredients = ingredients.map((ing) =>
+          ing.toLowerCase().replace(/[^a-z]/gi, "")
+        );
 
-    if (topSuggestions.length === 0 && allMeals.length > 0) {
-      console.warn("No filtered meals found — showing fallback meals");
-      const fallback = allMeals.sort(() => 0.5 - Math.random()).slice(0, 3);
-      setSuggestions(fallback);
-    } else {
-      setSuggestions(topSuggestions);
+        const hasAllergyConflict = userAllergies.some((allergy) => {
+          const normalizedAllergy = allergy
+            .toLowerCase()
+            .replace(/[^a-z]/gi, "")
+            .replace(/s$/, "");
+          return normalizedIngredients.some((ing) =>
+            ing.includes(normalizedAllergy)
+          );
+        });
+
+        if (hasAllergyConflict) {
+          console.log(`❌ "${mealName}" skipped due to allergy`);
+          return false;
+        }
+
+        const hasHealthConflict = userHealthConditions.some((condition) =>
+          tags.some((tag) =>
+            new RegExp(`\\b${condition}\\b`, "i").test(tag)
+          )
+        );
+
+        if (hasHealthConflict) {
+          console.log(`❌ "${mealName}" skipped due to health condition`);
+          return false;
+        }
+
+        return true;
+      });
+
+      const shuffled = validMeals.sort(() => 0.5 - Math.random());
+      const topSuggestions = shuffled.slice(0, 3);
+
+      if (topSuggestions.length === 0 && allMeals.length > 0) {
+        console.warn("⚠️ No filtered meals found — showing fallback meals");
+
+        const fallback = allMeals.filter((meal) => {
+          const {
+            mealName = "Unnamed Meal",
+            calories,
+            ingredients = [],
+            tags = [],
+          } = meal;
+
+          if (typeof calories !== "number") return false;
+
+          const normalizedIngredients = ingredients.map((ing) =>
+            ing.toLowerCase().replace(/[^a-z]/gi, "")
+          );
+
+          const hasAllergyConflict = userAllergies.some((allergy) => {
+            const normalizedAllergy = allergy
+              .toLowerCase()
+              .replace(/[^a-z]/gi, "")
+              .replace(/s$/, "");
+            return normalizedIngredients.some((ing) =>
+              ing.includes(normalizedAllergy)
+            );
+          });
+
+          if (hasAllergyConflict) return false;
+
+          const hasHealthConflict = userHealthConditions.some((condition) =>
+            tags.some((tag) => new RegExp(`\\b${condition}\\b`, "i").test(tag))
+          );
+
+          if (hasHealthConflict) return false;
+
+          return true;
+        });
+
+        const shuffledFallback = fallback.sort(() => 0.5 - Math.random()).slice(0, 3);
+        setSuggestions(shuffledFallback);
+      } else {
+        setSuggestions(topSuggestions);
+      }
+
+      setMealsLoading(false);
+    },
+    (error) => {
+      console.error("🔥 Real-time meal suggestion error:", error);
+      setMealsLoading(false);
     }
+  );
 
-    setMealsLoading(false);
-  }, (error) => {
-    console.error("Real-time meal suggestion error:", error);
-    setMealsLoading(false);
-  });
-
-  return unsub; 
+  return unsub;
 };
+
+
+
+
 
 
 useEffect(() => {
@@ -439,8 +524,6 @@ useEffect(() => {
   if (userData) {
     console.log("✅ userData loaded:", userData);
     fetchMealSuggestions(userData);
-  } else {
-    console.log("⏳ Waiting for userData...");
   }
 }, [userData]);
 
@@ -1287,7 +1370,7 @@ macroSkeletonValue: {
   backgroundColor: "#e5e7eb",
 },
 unavailableCard: {
-  backgroundColor: "#D3D3D3",
+  backgroundColor: "#E8E8E8 ",
   opacity: 0.6,
 },
 

@@ -54,6 +54,8 @@ const convertFtInToCm = (ftInStr) => {
   return (feet * 12 + inches) * 2.54;
 };
 
+
+
 export default function OnboardingScreen({ navigation }) {
   const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
@@ -196,6 +198,42 @@ const toggleHealthCondition = (condition) => {
 };
 
 
+const getBMIMessage = (bmi, category, goal) => {
+    const bmiFormatted = bmi.toFixed(1);
+
+    switch (category) {
+      case "Underweight":
+        return {
+          title: `A BMI of ${bmiFormatted} indicates you're in the Underweight range.`,
+          suggestion: `A goal like ${goal} can help you build strength, energy, and resilience.`,
+        };
+      case "Normal":
+      case "Healthy":
+        return {
+          title: `A BMI of ${bmiFormatted} is within the Healthy range.`,
+          suggestion: `Great job! We recommend focusing on maintaining your current weight and overall wellness.`,
+        };
+      case "Overweight":
+        return {
+          title: `A BMI of ${bmiFormatted} falls within the Overweight category.`,
+          suggestion: `A goal such as ${goal} can support your well-being and long-term vitality.`,
+        };
+      case "Obese":
+        return {
+          title: `A BMI of ${bmiFormatted} places you in the Obese category.`,
+          suggestion: `Aiming for ${goal} may significantly reduce health risks and improve your quality of life.`,
+        };
+      default:
+        return {
+          title: `Your BMI is ${bmiFormatted}.`,
+          suggestion: `Suggested goal: ${goal}`,
+        };
+    }
+  };
+
+
+
+
   useEffect(() => {
     const valid = validateStep(false);
     setIsCurrentStepValid(valid);
@@ -264,7 +302,7 @@ const validateStep = (showAlerts = true) => {
     }
 
     if (userData.Goal === "Weight Gain" && targetKg <= weight) {
-      showAlerts && Alert.alert("Target must be higher than current weight.");
+      showAlerts && Alert.alert("Target must be higher than current weight.");``
       return false;
     }
   }
@@ -342,6 +380,8 @@ const handleNext = () => {
     const bmi = calculateBMI(weightKg, heightCm);
     let suggestedGoal = null;
 
+    
+
     if (bmi) {
       if (bmi < 18.5) suggestedGoal = "Weight Gain";
       else if (bmi >= 18.5 && bmi < 25) suggestedGoal = "Maintain my current weight";
@@ -399,6 +439,7 @@ if (key === "Do you have any health conditions?") {
     return;
   }
 }
+
 
   // ✅ Allergy step validation
   if (key === "Allergy Details") {
@@ -645,14 +686,32 @@ if (key === "What is your goal?") {
       : parseFloat(userData.Weight) * 0.453592;
 
   const bmi = calculateBMI(weightKg, heightCm);
-
+  const bmiDisplay = bmi ? bmi.toFixed(1) : "—";
+  let bmiCategory = "";
   let suggestedGoal = null;
+
+
   if (bmi) {
-    if (bmi < 18.5) suggestedGoal = "Weight Gain";
-    else if (bmi >= 18.5 && bmi < 25) suggestedGoal = "Maintain my current weight";
-    else suggestedGoal = "Weight Loss";
+    if (bmi < 18.5){
+      bmiCategory = "Underweight";
+      suggestedGoal = "Weight Gain";
+    }
+    else if (bmi >= 18.5 && bmi < 25){
+        bmiCategory = "Normal";
+       suggestedGoal = "Maintain my current weight";
+    }else if(bmi >= 25 && bmi < 30){
+      bmiCategory = "Overweight";
+      suggestedGoal = "Weight Loss"
+    }
+    else{
+      bmiCategory = "Obese";
+      suggestedGoal = "Weight Loss";
+    }
   }
 
+  
+  const { title, suggestion } = getBMIMessage(bmi, bmiCategory, suggestedGoal);
+  
   const manualGoals = [
     "Weight Loss",
     "Maintain my current weight",
@@ -661,10 +720,12 @@ if (key === "What is your goal?") {
 
   return (
     <View style={{ gap: 16 }}>
-      <Text style={styles.subtitle}>
-        Based on your height and weight, we suggest the goal:{" "}
-        <Text style={{ fontWeight: "bold", color: "#14532d" }}>{suggestedGoal}</Text>
-      </Text>
+    <View style={styles.BMIcontainer}>
+        <Text style={styles.BMItitle}>{title}</Text>
+        <Text style={styles.BMIsuggestion}>{suggestion}</Text>
+      </View>
+
+
 
       <View style={styles.goalGrid}>
         {manualGoals.map((opt) => {
@@ -707,9 +768,10 @@ if (key === "What is your goal?") {
             setShowCustomGoalOptions(true); // enable all options
           }}
         >
-          <Text style={{ textAlign: "center", color: "#2563eb", marginTop: 10 }}>
-            I prefer to choose my goal manually
-          </Text>
+        <Text style={styles.manualGoalText}>
+          I prefer to choose my goal manually
+        </Text>
+
         </TouchableOpacity>
 
       )}
@@ -997,45 +1059,70 @@ if (derivedSteps[currentStep] === "Allergy Details") {
   );
 }
 
-  if (key === "When is your Birthday?") {
-    return (
-      <>
-        <TouchableOpacity
-          style={styles.input}
-          onPress={() => setShowDatePicker(true)}
-        >
-          <Text style={{ color: userData.Birthday ? "#111827" : "#9ca3af" }}>
-            {userData.Birthday
-              ? new Date(userData.Birthday).toLocaleDateString("en-US", {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                })
-              : "Select your birthday"}
-          </Text>
-        </TouchableOpacity>
-        {showDatePicker && (
-          <DateTimePicker
-            value={
-              userData.Birthday
-                ? new Date(userData.Birthday)
-                : new Date("2000-01-01")
+if (key === "When is your Birthday?") {
+  const birthday = userData.Birthday ? new Date(userData.Birthday) : null;
+
+  const getAge = (birthDate) => {
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const m = today.getMonth() - birthDate.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  };
+
+  const age = birthday ? getAge(birthday) : null;
+
+  return (
+    <>
+      <TouchableOpacity
+        style={styles.birthdayContainer}
+        onPress={() => setShowDatePicker(true)}
+        activeOpacity={0.8}
+      >
+      <View style={styles.birthdayRow}>
+          <View style={styles.iconTextRow}>
+            <Ionicons name="calendar-outline" size={18} color="#6b7280" style={{ marginRight: 8 }} />
+            <Text style={birthday ? styles.birthdayText : styles.birthdayPlaceholder}>
+              {birthday
+                ? birthday.toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  })
+                : "Select your birthday"}
+            </Text>
+          </View>
+
+          {birthday && (
+            <Text>
+              {age} yrs
+            </Text>
+          )}
+        </View>
+      </TouchableOpacity>
+
+      {showDatePicker && (
+        <DateTimePicker
+          value={birthday || new Date("2000-01-01")}
+          mode="date"
+          display={Platform.OS === "ios" ? "spinner" : "default"}
+          maximumDate={new Date()}
+          onChange={(event, selectedDate) => {
+            setShowDatePicker(Platform.OS === "ios");
+            if (selectedDate) {
+              const dateOnly = selectedDate.toISOString().split("T")[0];
+              handleInputChange("Birthday", dateOnly);
             }
-            mode="date"
-            display={Platform.OS === "ios" ? "spinner" : "default"}
-            maximumDate={new Date()}
-            onChange={(event, selectedDate) => {
-              setShowDatePicker(Platform.OS === "ios");
-              if (selectedDate) {
-                const dateOnly = selectedDate.toISOString().split("T")[0];
-                handleInputChange("Birthday", dateOnly);
-              }
-            }}
-          />
-        )}
-      </>
-    );
-  }
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+
 
   return (
     <TextInput
@@ -1637,5 +1724,87 @@ inputUnderlineOnly: {
   fontSize: 16,
   color: "#000",
 },
+ BMIcontainer: {
+    paddingHorizontal: 20,
+    marginBottom:10
+  },
+  BMItitle: {
+    textAlign: 'center',
+    fontSize: 16,
+    color: '#1f2937', // gray-800
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  BMIsuggestion: {
+    textAlign: 'center',
+    fontSize: 14,
+    color: '#4b5563', // gray-600
+    fontStyle: 'italic',
+  },
+  manualGoalText: {
+    textAlign: 'center',
+    marginBottom: 12,
+    fontSize: 14,
+    color: '#065f46', 
+    fontWeight: '500',
+    textDecorationLine: 'underline',
+  },
+birthdayContainer: {
+  backgroundColor: "#f9fafb", // soft gray
+  paddingVertical: 14,
+  paddingHorizontal: 16,
+  borderRadius: 12,
+  borderWidth: 1,
+  borderColor: "#e5e7eb", // gray-200
+  marginBottom: 12,
+},
 
+birthdayRow: {
+  flexDirection: "row",
+  justifyContent: "space-between",
+  alignItems: "center",
+},
+
+birthdayText: {
+  fontSize: 16,
+  fontWeight: "500",
+  color: "#111827", // gray-900
+},
+
+birthdayPlaceholder: {
+  fontSize: 16,
+  color: "#9ca3af", // gray-400
+},
+
+ageText: {
+  fontSize: 14,
+  color: "#6b7280", // gray-500
+  fontWeight: "500",
+},
+birthdayRow: {
+  flexDirection: "row",
+  justifyContent: "space-between",
+  alignItems: "center",
+},
+
+iconTextRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  flex: 1,
+},
+
+birthdayText: {
+  fontSize: 16,
+  color: "#111827",
+},
+birthdayPlaceholder: {
+  fontSize: 16,
+  color: "#9ca3af",
+},
+
+ageText: {
+  fontSize: 16,
+  fontWeight: "600",
+  color: "#2563eb",
+},
 });
