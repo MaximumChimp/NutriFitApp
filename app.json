@@ -31,7 +31,13 @@
           }
         }
       ],
-      "expo-notifications"
+      "expo-notifications",
+      [
+        "@rnmapbox/maps",
+        {
+          "RNMapboxMapsDownloadToken" : "sk.eyJ1IjoibWF4aW11bWNoaW1wIiwiYSI6ImNtZWZ0dnlpbDB1dXMya3M4ZHRnaGFtdmQifQ.y4Ugoe8iN1fXFVh1Z4m3yg"
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true

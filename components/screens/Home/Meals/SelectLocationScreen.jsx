@@ -9,21 +9,27 @@ import {
   Animated,
   DeviceEventEmitter,
 } from "react-native";
-import MapView, { Marker } from "react-native-maps";
-import * as Location from "expo-location";
+import MapboxGL from "@rnmapbox/maps";
 import { Ionicons } from "@expo/vector-icons";
 import debounce from "lodash.debounce";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import * as Location from "expo-location";
+
+MapboxGL.setAccessToken(
+  "pk.eyJ1IjoibWF4bWNoaW1wIiwiYSI6ImNtZWV2YjY5NzBtMWgybW9lMTNtN3N6ZDQifQ.n-kUUFFBb5c-cCIKMdHgCw"
+);
 
 const SelectLocationScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const mapRef = useRef(null);
+  const cameraRef = useRef(null);
+
   const [coords, setCoords] = useState(null);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [mapLoading, setMapLoading] = useState(true);
+  const [mapReady, setMapReady] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const pinAnim = useRef(new Animated.Value(0)).current;
 
@@ -40,41 +46,54 @@ const SelectLocationScreen = () => {
   const pinMyLocation = async () => {
     setLoading(true);
     try {
-      const loc = await Location.getCurrentPositionAsync({});
-      setCoords(loc.coords);
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        alert("Permission to access location was denied.");
+        setLoading(false);
+        return;
+      }
+
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Highest,
+      });
+      const newCoords = [loc.coords.longitude, loc.coords.latitude];
+      setCoords(newCoords);
+      const address = await reverseGeocode({
+        longitude: loc.coords.longitude,
+        latitude: loc.coords.latitude,
+      });
+      setQuery(address);
+
+      // Only move camera if map is ready
+      if (mapReady && cameraRef.current) {
+        cameraRef.current.setCamera({
+          centerCoordinate: newCoords,
+          zoomLevel: 18,
+          animationDuration: 500,
+        });
+      }
       animatePin();
-      mapRef.current?.animateToRegion(
-        {
-          ...loc.coords,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        },
-        1000
-      );
-      await reverseGeocode(loc.coords); // Update address input
     } catch (err) {
+      console.log("Error getting location:", err);
       alert("Failed to get location.");
     }
     setLoading(false);
   };
 
-  const reverseGeocode = async (location) => {
+  const reverseGeocode = async ({ latitude, longitude }) => {
     try {
       setSearchLoading(true);
-      const [addr] = await Location.reverseGeocodeAsync(location);
-      const parts = [
-        addr.name,
-        addr.street,
-        addr.subregion,
-        addr.city || addr.district,
-        addr.region,
-        addr.postalCode,
-        addr.country,
-      ];
-      const formattedAddress = parts.filter(Boolean).join(", ");
-      setQuery(formattedAddress);
-    } catch (error) {
-      console.warn("Reverse geocode failed:", error);
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+        {
+          headers: { "User-Agent": "NutriFit/1.0 (arvincabrera37@gmail.com)" },
+        }
+      );
+      const data = await res.json();
+      return data.display_name || "";
+    } catch (err) {
+      console.warn("Reverse geocode failed:", err);
+      return "";
     } finally {
       setSearchLoading(false);
     }
@@ -83,128 +102,111 @@ const SelectLocationScreen = () => {
   const search = debounce(async (text) => {
     if (!text) return setSuggestions([]);
     try {
+      setSearchLoading(true);
       const res = await fetch(
         `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
           text
-        )}&countrycodes=ph&format=json`,
+        )}&format=json&addressdetails=1&limit=5&countrycodes=ph`,
         {
-          headers: {
-            "User-Agent": "ReactNativeMealApp/1.0 (arvincabrera37@gmail.com)",
-          },
+          headers: { "User-Agent": "NutriFit/1.0 (arvincabrera37@gmail.com)" },
         }
       );
       const data = await res.json();
-      setSuggestions(data);
+      setSuggestions(data || []);
     } catch (err) {
-      console.error("Search error:", err);
+      console.error("Nominatim search error:", err);
+    } finally {
+      setSearchLoading(false);
     }
-  }, 500);
+  }, 300);
 
-  const confirm = async () => {
+  const confirm = () => {
     if (!coords) return;
 
-    try {
-      const [addr] = await Location.reverseGeocodeAsync(coords);
-      const parts = [
-        addr.name,
-        addr.street,
-        addr.subregion,
-        addr.city || addr.district,
-        addr.region,
-        addr.postalCode,
-        addr.country,
-      ];
-      const formattedAddress = parts.filter(Boolean).join(", ");
-      const selectedCoords = coords;
+    const selectedCoords = { latitude: coords[1], longitude: coords[0] };
+    const formattedAddress = query;
 
-      DeviceEventEmitter.emit("locationSelected", {
-        coords: selectedCoords,
-        address: formattedAddress,
-      });
+    DeviceEventEmitter.emit("locationSelected", {
+      coords: selectedCoords,
+      address: formattedAddress,
+    });
 
-      const callback = route.params?.onLocationSelected;
-      if (callback) {
-        callback(selectedCoords, formattedAddress);
-      }
+    const callback = route.params?.onLocationSelected;
+    if (callback) callback(selectedCoords, formattedAddress);
 
-      navigation.goBack();
-    } catch (error) {
-      console.warn("Failed to reverse geocode:", error);
-    }
+    navigation.goBack();
   };
 
   useEffect(() => {
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        alert("Permission to access location was denied.");
-        return;
-      }
-      pinMyLocation();
-    })();
-  }, []);
-
-  useEffect(() => {
-    search(query);
-  }, [query]);
+    pinMyLocation();
+  }, [mapReady]);
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Map View */}
-      <MapView
+      {/* Map */}
+      <MapboxGL.MapView
         ref={mapRef}
         style={{ flex: 1 }}
-        region={{
-          latitude: coords?.latitude || 14.5995,
-          longitude: coords?.longitude || 120.9842,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
-        }}
-        onPress={(e) => {
-          const loc = e.nativeEvent.coordinate;
-          setCoords(loc);
+        styleURL={MapboxGL.StyleURL.Street}
+        onDidFinishRenderingMapFully={() => setMapReady(true)}
+        onMapIdle={() => setMapReady(true)}
+        onPress={async (e) => {
+          const [lon, lat] = e.geometry.coordinates;
+          const newCoords = [lon, lat];
+          setCoords(newCoords);
+          const address = await reverseGeocode({ longitude: lon, latitude: lat });
+          setQuery(address);
+
+          if (mapReady && cameraRef.current) {
+            cameraRef.current.setCamera({
+              centerCoordinate: newCoords,
+              zoomLevel: 18,
+              animationDuration: 500,
+            });
+          }
           animatePin();
-          reverseGeocode(loc);
         }}
-        onRegionChange={() => setMapLoading(true)}
-        onRegionChangeComplete={() => setMapLoading(false)}
       >
         {coords && (
-          <Marker
-            coordinate={coords}
-            draggable
-            onDragEnd={(e) => {
-              const loc = e.nativeEvent.coordinate;
-              setCoords(loc);
-              reverseGeocode(loc);
-            }}
-          >
-            <Animated.View
-              style={{
-                transform: [
-                  {
-                    scale: pinAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [1.5, 1],
-                    }),
-                  },
-                  {
-                    translateY: pinAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-20, 0],
-                    }),
-                  },
-                ],
+          <>
+            <MapboxGL.Camera
+              ref={cameraRef}
+              zoomLevel={18}
+              centerCoordinate={coords}
+              animationMode="flyTo"
+              animationDuration={500}
+            />
+
+            <MapboxGL.PointAnnotation
+              id="marker"
+              coordinate={coords}
+              draggable
+              onDragEnd={async (e) => {
+                const [lon, lat] = e.geometry.coordinates;
+                const newCoords = [lon, lat];
+                setCoords(newCoords);
+                const address = await reverseGeocode({ longitude: lon, latitude: lat });
+                setQuery(address);
+                animatePin();
               }}
             >
-              <Ionicons name="location-sharp" size={38} color="#10b981" />
-            </Animated.View>
-          </Marker>
+              <Animated.View
+                style={{
+                  transform: [
+                    { scale: pinAnim.interpolate({ inputRange: [0, 1], outputRange: [1.5, 1] }) },
+                    { translateY: pinAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) },
+                  ],
+                }}
+              >
+                <Ionicons name="location-sharp" size={38} color="#10b981" />
+              </Animated.View>
+            </MapboxGL.PointAnnotation>
+          </>
         )}
-      </MapView>
+      </MapboxGL.MapView>
 
-      {/* Map Loading Spinner */}
-      {mapLoading && (
+      {/* Map loading spinner */}
+      {!mapReady && (
         <View
           style={{
             position: "absolute",
@@ -219,7 +221,7 @@ const SelectLocationScreen = () => {
         </View>
       )}
 
-      {/* Search Input & Suggestions */}
+      {/* Search input */}
       <View style={{ position: "absolute", top: 40, left: 0, right: 0, paddingHorizontal: 10 }}>
         <View
           style={{
@@ -233,7 +235,11 @@ const SelectLocationScreen = () => {
         >
           <TextInput
             value={query}
-            onChangeText={setQuery}
+            onChangeText={(text) => {
+              setQuery(text);
+              if (text.length > 0) search(text);
+              else setSuggestions([]);
+            }}
             placeholder="Search location..."
             style={{ flex: 1, paddingVertical: 12, fontSize: 16 }}
           />
@@ -246,6 +252,7 @@ const SelectLocationScreen = () => {
           ) : null}
         </View>
 
+        {/* Suggestions */}
         {suggestions.length > 0 && (
           <ScrollView
             style={{ maxHeight: 200, backgroundColor: "white", borderRadius: 10 }}
@@ -255,22 +262,21 @@ const SelectLocationScreen = () => {
               <TouchableOpacity
                 key={index}
                 onPress={() => {
-                  const selected = {
-                    latitude: parseFloat(item.lat),
-                    longitude: parseFloat(item.lon),
-                  };
-                  setCoords(selected);
-                  animatePin();
+                  const lon = parseFloat(item.lon);
+                  const lat = parseFloat(item.lat);
+                  const newCoords = [lon, lat];
+                  setCoords(newCoords);
                   setQuery(item.display_name);
                   setSuggestions([]);
-                  mapRef.current?.animateToRegion(
-                    {
-                      ...selected,
-                      latitudeDelta: 0.01,
-                      longitudeDelta: 0.01,
-                    },
-                    1000
-                  );
+                  animatePin();
+
+                  if (mapReady && cameraRef.current) {
+                    cameraRef.current.setCamera({
+                      centerCoordinate: newCoords,
+                      zoomLevel: 18,
+                      animationDuration: 500,
+                    });
+                  }
                 }}
                 style={{
                   padding: 10,
@@ -285,7 +291,7 @@ const SelectLocationScreen = () => {
         )}
       </View>
 
-      {/* Pin My Location Button */}
+      {/* Pin my location */}
       <TouchableOpacity
         onPress={pinMyLocation}
         style={{
@@ -298,14 +304,10 @@ const SelectLocationScreen = () => {
           elevation: 5,
         }}
       >
-        {loading ? (
-          <ActivityIndicator color="#10b981" />
-        ) : (
-          <Ionicons name="locate" size={24} color="#10b981" />
-        )}
+        {loading ? <ActivityIndicator color="#10b981" /> : <Ionicons name="locate" size={24} color="#10b981" />}
       </TouchableOpacity>
 
-      {/* Confirm Button */}
+      {/* Confirm button */}
       <TouchableOpacity
         onPress={confirm}
         style={{
@@ -319,9 +321,7 @@ const SelectLocationScreen = () => {
           alignItems: "center",
         }}
       >
-        <Text style={{ color: "white", fontSize: 16, fontWeight: "600" }}>
-          Confirm Location
-        </Text>
+        <Text style={{ color: "white", fontSize: 16, fontWeight: "600" }}>Confirm Location</Text>
       </TouchableOpacity>
     </View>
   );
