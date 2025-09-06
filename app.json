@@ -12,18 +12,12 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "plugins": [
       [
         "expo-splash-screen",
         {
-          "image": "./assets/icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#d4fc79",
           "android": {
             "userInterfaceStyle": "light",
             "resizeMode": "cover",
@@ -35,7 +29,7 @@
       [
         "@rnmapbox/maps",
         {
-          "RNMapboxMapsDownloadToken" : "sk.eyJ1IjoibWF4aW11bWNoaW1wIiwiYSI6ImNtZWZ0dnlpbDB1dXMya3M4ZHRnaGFtdmQifQ.y4Ugoe8iN1fXFVh1Z4m3yg"
+          "RNMapboxMapsDownloadToken": "sk.eyJ1IjoibWF4bWNoaW1wIiwiYSI6ImNtZXZjbzF6YTBhejQya3F4bnNzYXZkcXYifQ.AoORvwLEgO_QUxib68-kQg"
         }
       ]
     ],
@@ -66,6 +60,9 @@
         "projectId": "3351475d-5e3e-4afa-8a3c-319d45f8fc07"
       }
     },
-    "owner": "maximumchimp"
+    "owner": "maximumchimp",
+    "splash": {
+      "backgroundColor": "#d4fc79"
+    }
   }
 }

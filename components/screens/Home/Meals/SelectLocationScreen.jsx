@@ -1,330 +1,400 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
+  StyleSheet,
   View,
-  Text,
-  TouchableOpacity,
-  TextInput,
-  ScrollView,
-  ActivityIndicator,
+  PermissionsAndroid,
+  Platform,
   Animated,
-  DeviceEventEmitter,
+  TextInput,
+  FlatList,
+  TouchableOpacity,
+  Text,
+  Keyboard,
 } from "react-native";
-import MapboxGL from "@rnmapbox/maps";
+import Mapbox from "@rnmapbox/maps";
+import { useRoute, useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import debounce from "lodash.debounce";
-import { useNavigation, useRoute } from "@react-navigation/native";
 import * as Location from "expo-location";
-
-MapboxGL.setAccessToken(
-  "pk.eyJ1IjoibWF4bWNoaW1wIiwiYSI6ImNtZWV2YjY5NzBtMWgybW9lMTNtN3N6ZDQifQ.n-kUUFFBb5c-cCIKMdHgCw"
+import AsyncStorage from "@react-native-async-storage/async-storage";
+Mapbox.setAccessToken(
+  "pk.eyJ1IjoibWF4aW11bWNoaW1wIiwiYSI6ImNtZWdxZHMyczE0d3Eya3NnMGdxMzZjNnEifQ.U7gxagxTZmIk85_fxYASWg"
 );
 
-const SelectLocationScreen = () => {
-  const navigation = useNavigation();
+const SelectionLocationScreen = () => {
   const route = useRoute();
-  const mapRef = useRef(null);
-  const cameraRef = useRef(null);
+  const navigation = useNavigation();
+  const { coords } = route.params || {};
+  const [userLocation, setUserLocation] = useState(coords || null);
 
-  const [coords, setCoords] = useState(null);
   const [query, setQuery] = useState("");
-  const [suggestions, setSuggestions] = useState([]);
+  const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [mapReady, setMapReady] = useState(false);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const pinAnim = useRef(new Animated.Value(0)).current;
+  const [selectedAddress, setSelectedAddress] = useState(null);
+  const debounceRef = useRef(null);
 
-  const animatePin = () => {
-    pinAnim.setValue(0);
-    Animated.spring(pinAnim, {
-      toValue: 1,
-      useNativeDriver: true,
-      friction: 4,
-      tension: 80,
-    }).start();
-  };
+  const bounceAnim = useRef(new Animated.Value(1)).current;
 
-  const pinMyLocation = async () => {
-    setLoading(true);
+  // Reverse geocode helper
+  const fetchAddressFromCoords = async (latitude, longitude) => {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") {
-        alert("Permission to access location was denied.");
-        setLoading(false);
-        return;
-      }
-
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Highest,
-      });
-      const newCoords = [loc.coords.longitude, loc.coords.latitude];
-      setCoords(newCoords);
-      const address = await reverseGeocode({
-        longitude: loc.coords.longitude,
-        latitude: loc.coords.latitude,
-      });
-      setQuery(address);
-
-      // Only move camera if map is ready
-      if (mapReady && cameraRef.current) {
-        cameraRef.current.setCamera({
-          centerCoordinate: newCoords,
-          zoomLevel: 18,
-          animationDuration: 500,
-        });
-      }
-      animatePin();
-    } catch (err) {
-      console.log("Error getting location:", err);
-      alert("Failed to get location.");
-    }
-    setLoading(false);
-  };
-
-  const reverseGeocode = async ({ latitude, longitude }) => {
-    try {
-      setSearchLoading(true);
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
-        {
-          headers: { "User-Agent": "NutriFit/1.0 (arvincabrera37@gmail.com)" },
-        }
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`,
+        { headers: { "User-Agent": "NutriFitApp/1.0" } }
       );
-      const data = await res.json();
-      return data.display_name || "";
+      const data = await response.json();
+
+      // Fallback logic for barangay/purok/subdivision
+      const barangay =
+        data.address?.village ||
+        data.address?.suburb ||
+        data.address?.neighbourhood ||
+        data.address?.locality ||
+        "";
+      const purok =
+        data.address?.neighbourhood || data.address?.suburb || data.address?.locality || "";
+
+      const structured = {
+        displayName: data.display_name || "Unknown location",
+        houseNumber: data.address?.house_number || "",
+        road: data.address?.road || data.address?.residential || "",
+        purok,
+        barangay,
+        city:
+          data.address?.city ||
+          data.address?.town ||
+          data.address?.municipality ||
+          "",
+        province: data.address?.state || "",
+        country: data.address?.country || "",
+      };
+
+      return structured;
     } catch (err) {
-      console.warn("Reverse geocode failed:", err);
-      return "";
-    } finally {
-      setSearchLoading(false);
+      console.error("Reverse geocoding error:", err);
+      return {
+        displayName: "Unknown location",
+        houseNumber: "",
+        road: "",
+        purok: "",
+        barangay: "",
+        city: "",
+        province: "",
+        country: "",
+      };
     }
-  };
-
-  const search = debounce(async (text) => {
-    if (!text) return setSuggestions([]);
-    try {
-      setSearchLoading(true);
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
-          text
-        )}&format=json&addressdetails=1&limit=5&countrycodes=ph`,
-        {
-          headers: { "User-Agent": "NutriFit/1.0 (arvincabrera37@gmail.com)" },
-        }
-      );
-      const data = await res.json();
-      setSuggestions(data || []);
-    } catch (err) {
-      console.error("Nominatim search error:", err);
-    } finally {
-      setSearchLoading(false);
-    }
-  }, 300);
-
-  const confirm = () => {
-    if (!coords) return;
-
-    const selectedCoords = { latitude: coords[1], longitude: coords[0] };
-    const formattedAddress = query;
-
-    DeviceEventEmitter.emit("locationSelected", {
-      coords: selectedCoords,
-      address: formattedAddress,
-    });
-
-    const callback = route.params?.onLocationSelected;
-    if (callback) callback(selectedCoords, formattedAddress);
-
-    navigation.goBack();
   };
 
   useEffect(() => {
-    pinMyLocation();
-  }, [mapReady]);
+    (async () => {
+      if (Platform.OS === "android") {
+        await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+        );
+      }
+
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        console.warn("Permission to access location was denied");
+      }
+    })();
+
+    const keyboardListener = Keyboard.addListener("keyboardDidHide", () => {
+      setResults([]);
+    });
+
+    return () => {
+      keyboardListener.remove();
+    };
+  }, []);
+
+  const triggerBounce = () => {
+    Animated.sequence([
+      Animated.spring(bounceAnim, { toValue: 1.3, friction: 3, useNativeDriver: true }),
+      Animated.spring(bounceAnim, { toValue: 1, friction: 3, useNativeDriver: true }),
+    ]).start();
+  };
+
+  useEffect(() => {
+    if (userLocation) triggerBounce();
+  }, [userLocation]);
+
+  const handleSearchChange = (text) => {
+    setQuery(text);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (text.length < 3) {
+      setResults([]);
+      return;
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+            text
+          )}&addressdetails=1&limit=5&countrycodes=ph`,
+          { headers: { "User-Agent": "NutriFitApp/1.0" } }
+        );
+        const data = await response.json();
+        setResults(data);
+      } catch (err) {
+        console.error("Search error:", err);
+      }
+      setLoading(false);
+    }, 500);
+  };
+
+  const handleSelectResult = async (item) => {
+    const coords = { latitude: parseFloat(item.lat), longitude: parseFloat(item.lon) };
+    setUserLocation(coords);
+    setResults([]);
+    setQuery(item.display_name);
+    triggerBounce();
+    Keyboard.dismiss();
+
+    const addr = await fetchAddressFromCoords(coords.latitude, coords.longitude);
+    setSelectedAddress(addr);
+  };
+
+  const clearSearch = () => {
+    setQuery("");
+    setResults([]);
+    Keyboard.dismiss();
+  };
 
   return (
-    <View style={{ flex: 1 }}>
-      {/* Map */}
-      <MapboxGL.MapView
-        ref={mapRef}
-        style={{ flex: 1 }}
-        styleURL={MapboxGL.StyleURL.Street}
-        onDidFinishRenderingMapFully={() => setMapReady(true)}
-        onMapIdle={() => setMapReady(true)}
-        onPress={async (e) => {
-          const [lon, lat] = e.geometry.coordinates;
-          const newCoords = [lon, lat];
-          setCoords(newCoords);
-          const address = await reverseGeocode({ longitude: lon, latitude: lat });
-          setQuery(address);
-
-          if (mapReady && cameraRef.current) {
-            cameraRef.current.setCamera({
-              centerCoordinate: newCoords,
-              zoomLevel: 18,
-              animationDuration: 500,
-            });
-          }
-          animatePin();
-        }}
-      >
-        {coords && (
-          <>
-            <MapboxGL.Camera
-              ref={cameraRef}
-              zoomLevel={18}
-              centerCoordinate={coords}
-              animationMode="flyTo"
-              animationDuration={500}
-            />
-
-            <MapboxGL.PointAnnotation
-              id="marker"
-              coordinate={coords}
-              draggable
-              onDragEnd={async (e) => {
-                const [lon, lat] = e.geometry.coordinates;
-                const newCoords = [lon, lat];
-                setCoords(newCoords);
-                const address = await reverseGeocode({ longitude: lon, latitude: lat });
-                setQuery(address);
-                animatePin();
-              }}
-            >
-              <Animated.View
-                style={{
-                  transform: [
-                    { scale: pinAnim.interpolate({ inputRange: [0, 1], outputRange: [1.5, 1] }) },
-                    { translateY: pinAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) },
-                  ],
-                }}
-              >
-                <Ionicons name="location-sharp" size={38} color="#10b981" />
-              </Animated.View>
-            </MapboxGL.PointAnnotation>
-          </>
-        )}
-      </MapboxGL.MapView>
-
-      {/* Map loading spinner */}
-      {!mapReady && (
-        <View
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            marginLeft: -15,
-            marginTop: -15,
-            zIndex: 10,
-          }}
-        >
-          <ActivityIndicator size="large" color="#10b981" />
-        </View>
-      )}
-
-      {/* Search input */}
-      <View style={{ position: "absolute", top: 40, left: 0, right: 0, paddingHorizontal: 10 }}>
-        <View
-          style={{
-            backgroundColor: "white",
-            borderRadius: 10,
-            flexDirection: "row",
-            alignItems: "center",
-            paddingHorizontal: 10,
-            marginBottom: 5,
-          }}
-        >
-          <TextInput
-            value={query}
-            onChangeText={(text) => {
-              setQuery(text);
-              if (text.length > 0) search(text);
-              else setSuggestions([]);
-            }}
-            placeholder="Search location..."
-            style={{ flex: 1, paddingVertical: 12, fontSize: 16 }}
-          />
-          {searchLoading ? (
-            <ActivityIndicator size="small" color="#10b981" />
-          ) : query.length > 0 ? (
-            <TouchableOpacity onPress={() => setQuery("")}>
-              <Ionicons name="close" size={20} color="#999" />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-        {/* Suggestions */}
-        {suggestions.length > 0 && (
-          <ScrollView
-            style={{ maxHeight: 200, backgroundColor: "white", borderRadius: 10 }}
-            keyboardShouldPersistTaps="handled"
-          >
-            {suggestions.map((item, index) => (
-              <TouchableOpacity
-                key={index}
-                onPress={() => {
-                  const lon = parseFloat(item.lon);
-                  const lat = parseFloat(item.lat);
-                  const newCoords = [lon, lat];
-                  setCoords(newCoords);
-                  setQuery(item.display_name);
-                  setSuggestions([]);
-                  animatePin();
-
-                  if (mapReady && cameraRef.current) {
-                    cameraRef.current.setCamera({
-                      centerCoordinate: newCoords,
-                      zoomLevel: 18,
-                      animationDuration: 500,
-                    });
-                  }
-                }}
-                style={{
-                  padding: 10,
-                  borderBottomWidth: 1,
-                  borderColor: "#eee",
-                }}
-              >
-                <Text>{item.display_name}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+    <View style={styles.page}>
+      {/* Search Bar with Clear Button */}
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={18} color="#555" style={{ marginRight: 6 }} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search location..."
+          value={query}
+          onChangeText={handleSearchChange}
+        />
+        {query.length > 0 && (
+          <TouchableOpacity onPress={clearSearch} style={{ padding: 4 }}>
+            <Ionicons name="close-circle" size={18} color="#888" />
+          </TouchableOpacity>
         )}
       </View>
 
-      {/* Pin my location */}
-      <TouchableOpacity
-        onPress={pinMyLocation}
-        style={{
-          position: "absolute",
-          bottom: 100,
-          right: 20,
-          backgroundColor: "white",
-          padding: 12,
-          borderRadius: 50,
-          elevation: 5,
-        }}
-      >
-        {loading ? <ActivityIndicator color="#10b981" /> : <Ionicons name="locate" size={24} color="#10b981" />}
-      </TouchableOpacity>
+      {/* Results Dropdown */}
+      {results.length > 0 && (
+        <FlatList
+          keyboardShouldPersistTaps="handled"
+          data={results}
+          keyExtractor={(item, index) => index.toString()}
+          style={styles.resultsList}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.resultItem}
+              onPress={() => handleSelectResult(item)}
+            >
+              <Text style={styles.resultText}>{item.display_name}</Text>
+            </TouchableOpacity>
+          )}
+        />
+      )}
 
-      {/* Confirm button */}
-      <TouchableOpacity
-        onPress={confirm}
-        style={{
-          position: "absolute",
-          bottom: 30,
-          left: 20,
-          right: 20,
-          backgroundColor: "#10b981",
-          padding: 15,
-          borderRadius: 10,
-          alignItems: "center",
+      {/* Map */}
+      <Mapbox.MapView
+        styleURL={Mapbox.StyleURL.Street}
+        style={styles.map}
+        compassEnabled
+        zoomEnabled
+        defaultSettings={{
+          centerCoordinate: coords
+            ? [coords.longitude, coords.latitude]
+            : [120.9842, 14.5995],
+          zoomLevel: 17,
+        }}
+        onPress={async (e) => {
+          const [longitude, latitude] = e.geometry.coordinates;
+          setUserLocation({ longitude, latitude });
+          setResults([]);
+          triggerBounce();
+          Keyboard.dismiss();
+
+          const addr = await fetchAddressFromCoords(latitude, longitude);
+          setQuery(addr.displayName);
+          setSelectedAddress(addr);
         }}
       >
-        <Text style={{ color: "white", fontSize: 16, fontWeight: "600" }}>Confirm Location</Text>
-      </TouchableOpacity>
+        {userLocation && (
+          <Mapbox.Camera
+            zoomLevel={17}
+            centerCoordinate={[userLocation.longitude, userLocation.latitude]}
+            animationMode="flyTo"
+            animationDuration={500}
+          />
+        )}
+
+        {userLocation && (
+          <Mapbox.PointAnnotation
+            id="selected-location"
+            coordinate={[userLocation.longitude, userLocation.latitude]}
+            draggable
+            onDragEnd={async (e) => {
+              const [longitude, latitude] = e.geometry.coordinates;
+              setUserLocation({ longitude, latitude });
+              triggerBounce();
+
+              const addr = await fetchAddressFromCoords(latitude, longitude);
+              setQuery(addr.displayName);
+              setSelectedAddress(addr);
+            }}
+          >
+            <Animated.View style={{ transform: [{ scale: bounceAnim }] }}>
+              <Ionicons name="location-sharp" size={40} color="#14532d" />
+            </Animated.View>
+          </Mapbox.PointAnnotation>
+        )}
+      </Mapbox.MapView>
+
+{/* Floating Buttons */}
+<View style={styles.floatingContainer}>
+  <View style={styles.confirmWrapper}>
+    {/* Confirm Button */}
+
+<TouchableOpacity
+  style={styles.confirmBtn}
+  onPress={async () => {
+    if (userLocation && selectedAddress) {
+      try {
+        // Save to AsyncStorage
+        await AsyncStorage.setItem("userCoords", JSON.stringify(userLocation));
+        await AsyncStorage.setItem("userAddress", selectedAddress.displayName);
+
+        // Navigate back to MainTabs -> Order
+        navigation.navigate("MainTabs", {
+          screen: "Order",
+          params: {
+            coords: userLocation,
+            address: selectedAddress.displayName,
+          },
+        });
+      } catch (err) {
+        console.error("Error saving address:", err);
+      }
+    }
+  }}
+>
+  <Text style={styles.confirmText}>Confirm</Text>
+</TouchableOpacity>
+
+
+    {/* Current Location Button */}
+    <TouchableOpacity
+      style={styles.fabRight}
+      onPress={async () => {
+        try {
+          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          const { latitude, longitude } = pos.coords;
+          setUserLocation({ latitude, longitude });
+          triggerBounce();
+
+          const addr = await fetchAddressFromCoords(latitude, longitude);
+          setQuery(addr.displayName);
+          setSelectedAddress(addr);
+        } catch (err) {
+          console.error("GPS error:", err);
+        }
+      }}
+    >
+      <Ionicons name="locate" size={22} color="#fff" />
+    </TouchableOpacity>
+  </View>
+</View>
+
+
+
+
     </View>
   );
 };
 
-export default SelectLocationScreen;
+export default SelectionLocationScreen;
+
+const styles = StyleSheet.create({
+  page: { flex: 1 },
+  map: { flex: 1 },
+  searchContainer: {
+    position: "absolute",
+    top: 50,
+    left: 15,
+    right: 15,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    zIndex: 10,
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: "#333" },
+  resultsList: {
+    position: "absolute",
+    top: 95,
+    left: 15,
+    right: 15,
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    maxHeight: 200,
+    zIndex: 10,
+    elevation: 3,
+  },
+  resultItem: { padding: 10, borderBottomWidth: 1, borderBottomColor: "#eee" },
+  resultText: { fontSize: 14, color: "#333" },
+floatingContainer: {
+  position: "absolute",
+  bottom: 40,
+  left: 20,
+  right: 20,
+  alignItems: "center",
+},
+
+confirmWrapper: {
+  width: "100%",
+  position: "relative", 
+},
+
+confirmBtn: {
+  width: "100%",
+  backgroundColor: "#22c55e",
+  paddingVertical: 14,
+  borderRadius: 8,
+  alignItems: "center",
+  justifyContent: "center",
+  shadowColor: "#000",
+  shadowOpacity: 0.2,
+  shadowRadius: 4,
+  elevation: 5,
+},
+
+confirmText: {
+  color: "#fff",
+  fontSize: 16,
+  fontWeight: "bold",
+},
+
+fabRight: {
+  position: "absolute",
+  bottom: 100, // above the confirm button
+  right: 10, // right corner
+  backgroundColor: "#14532d",
+  padding: 12,
+  borderRadius: 30,
+  shadowColor: "#000",
+  shadowOpacity: 0.2,
+  shadowRadius: 4,
+  elevation: 5,
+},
+
+});

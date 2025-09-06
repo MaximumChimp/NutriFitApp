@@ -25,7 +25,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import { auth, db } from "@/config/firebase-config";
-import { doc, getDoc, collection,query,orderBy, where,Timestamp, getDocs,addDoc,onSnapshot} from "firebase/firestore";
+import { doc, getDoc, collection,query,orderBy, where,Timestamp, getDocs,addDoc,onSnapshot,setDoc,deleteDoc } from "firebase/firestore";
 import { Dimensions } from "react-native";
 const screenWidth = Dimensions.get("window").width;
 const CARD_WIDTH = screenWidth - 48;
@@ -136,9 +136,10 @@ export default function HomeScreen({ navigation }) {
   const [lostStreakVisible, setLostStreakVisible] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [userData, setUserData] = useState(null);
-const safeCaloriesTarget = tdee || 0;
-const safeCaloriesEaten = caloriesEaten || 0;
-const safeCaloriesBurned = caloriesBurned || 0;
+  const safeCaloriesTarget = tdee || 0;
+  const safeCaloriesEaten = caloriesEaten || 0;
+  const safeCaloriesBurned = caloriesBurned || 0;
+  const [favorites, setFavorites] = useState({});
 
 const safeCaloriesLeft = caloriesLeft || 0;
 
@@ -200,6 +201,73 @@ const onRefresh = async () => {
     setRefreshing(false);
   }
 };
+
+
+useEffect(() => {
+  const fetchFavorites = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    const favSnapshot = await getDocs(
+      collection(db, "users", user.uid, "favorites")
+    );
+    const favs = {};
+    favSnapshot.forEach((doc) => {
+      favs[doc.id] = true;
+    });
+    setFavorites(favs);
+  };
+
+  fetchFavorites();
+}, []);
+
+
+const toggleFavorite = async (meal) => {
+  const user = auth.currentUser;
+  if (!user) {
+    console.log("No user logged in");
+    return;
+  }
+
+  const isFavorite = !!favorites[meal.id];
+
+  // ✅ Optimistic UI update
+  setFavorites((prev) => {
+    const updated = { ...prev };
+    if (isFavorite) {
+      delete updated[meal.id];
+    } else {
+      updated[meal.id] = true;
+    }
+    return updated;
+  });
+
+  const favRef = doc(db, "users", user.uid, "favorites", meal.id);
+
+  try {
+    if (isFavorite) {
+      await deleteDoc(favRef);
+      console.log("Successfully removed favorite from Firestore");
+    } else {
+      await setDoc(favRef, { mealId: meal.id, timestamp: Timestamp.now() });
+      console.log("Successfully added favorite to Firestore");
+    }
+  } catch (err) {
+    console.error("Failed to update favorite:", err);
+
+    // ⚠️ Optional: revert UI change if Firestore fails
+    setFavorites((prev) => {
+      const reverted = { ...prev };
+      if (isFavorite) {
+        reverted[meal.id] = true; // restore
+      } else {
+        delete reverted[meal.id]; // remove
+      }
+      return reverted;
+    });
+  }
+};
+
 
 
 
@@ -313,7 +381,6 @@ useFocusEffect(
         }
 
       } catch (error) {
-        console.error('🚨 Error checking streak:', error);
       }
     };
 
@@ -365,7 +432,6 @@ useEffect(() => {
 }, []);
 
 
-
 const fetchMealSuggestions = async (userData) => {
   if (!userData?.requiredCalories || !userData?.uid) return () => {};
 
@@ -382,38 +448,43 @@ const fetchMealSuggestions = async (userData) => {
   );
 
   const snapshot = await getDocs(q);
-  const mealsToday = snapshot.docs.map((doc) => doc.data());
+  const mealsToday = snapshot.docs.map((doc) => ({
+    id: doc.id, // <-- include document ID
+    ...doc.data(),
+  }));
+
   const totalCalories = mealsToday.reduce(
     (sum, meal) => sum + (meal.calories || 0),
     0
   );
-  const remainingCalories = Math.max(100, userData.requiredCalories - totalCalories);
-  console.log("✅ Remaining calories:", remainingCalories);
+  const remainingCalories = Math.max(
+    100,
+    userData.requiredCalories - totalCalories
+  );
 
   // Step 2: Start meal suggestions listener
   const unsub = onSnapshot(
     collection(db, "meals"),
     (snapshot) => {
-      const allMeals = snapshot.docs.map((doc) => doc.data());
+      const allMeals = snapshot.docs.map((doc) => ({
+        id: doc.id, // <-- include document ID here too
+        ...doc.data(),
+      }));
 
       const userAllergies = [
         ...(userData.Allergies || []),
-        ...(userData.OtherAllergy?.trim() ? [userData.OtherAllergy] : [])
+        ...(userData.OtherAllergy?.trim() ? [userData.OtherAllergy] : []),
       ];
 
       const userHealthConditions = [
         ...(userData.HealthConditions || []),
-        ...(userData.OtherHealthCondition?.trim() ? [userData.OtherHealthCondition] : [])
+        ...(userData.OtherHealthCondition?.trim()
+          ? [userData.OtherHealthCondition]
+          : []),
       ];
 
-
       const validMeals = allMeals.filter((meal) => {
-        const {
-          mealName = "Unnamed Meal",
-          calories,
-          ingredients = [],
-          tags = [],
-        } = meal;
+        const { calories, ingredients = [], tags = [] } = meal;
 
         if (typeof calories !== "number" || calories > remainingCalories)
           return false;
@@ -432,21 +503,13 @@ const fetchMealSuggestions = async (userData) => {
           );
         });
 
-        if (hasAllergyConflict) {
-          console.log(`❌ "${mealName}" skipped due to allergy`);
-          return false;
-        }
+        if (hasAllergyConflict) return false;
 
         const hasHealthConflict = userHealthConditions.some((condition) =>
-          tags.some((tag) =>
-            new RegExp(`\\b${condition}\\b`, "i").test(tag)
-          )
+          tags.some((tag) => new RegExp(`\\b${condition}\\b`, "i").test(tag))
         );
 
-        if (hasHealthConflict) {
-          console.log(`❌ "${mealName}" skipped due to health condition`);
-          return false;
-        }
+        if (hasHealthConflict) return false;
 
         return true;
       });
@@ -455,16 +518,8 @@ const fetchMealSuggestions = async (userData) => {
       const topSuggestions = shuffled.slice(0, 3);
 
       if (topSuggestions.length === 0 && allMeals.length > 0) {
-        console.warn("⚠️ No filtered meals found — showing fallback meals");
-
         const fallback = allMeals.filter((meal) => {
-          const {
-            mealName = "Unnamed Meal",
-            calories,
-            ingredients = [],
-            tags = [],
-          } = meal;
-
+          const { calories, ingredients = [], tags = [] } = meal;
           if (typeof calories !== "number") return false;
 
           const normalizedIngredients = ingredients.map((ing) =>
@@ -492,7 +547,10 @@ const fetchMealSuggestions = async (userData) => {
           return true;
         });
 
-        const shuffledFallback = fallback.sort(() => 0.5 - Math.random()).slice(0, 3);
+        const shuffledFallback = fallback.sort(() => 0.5 - Math.random()).slice(
+          0,
+          3
+        );
         setSuggestions(shuffledFallback);
       } else {
         setSuggestions(topSuggestions);
@@ -522,7 +580,6 @@ useEffect(() => {
 
 useEffect(() => {
   if (userData) {
-    console.log("✅ userData loaded:", userData);
     fetchMealSuggestions(userData);
   }
 }, [userData]);
@@ -807,119 +864,124 @@ return (
       </View>
 
       {/* Meal Suggestions */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Meal Suggestions</Text>
+<View style={styles.section}>
+  <Text style={styles.sectionTitle}>Meal Suggestions</Text>
 
-        {!isConnected ? (
-          <Text style={{ color: "#6b7280", marginTop: 10 }}>
-            Looks like you're offline. We'll load meal suggestions as soon as you're back online.
-          </Text>
-        ) : mealsLoading || tdee === null ? (
-          <View
-            style={{
-              width: CARD_WIDTH,
-              height: 140,
-              borderRadius: 16,
-              backgroundColor: "#e5e7eb",
-              alignSelf: "center",
-              marginTop: 20,
-            }}
-          />
-        ) : suggestions.length > 0 ? (
-          <View style={{ alignItems: "center", paddingVertical: 20 }}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              snapToInterval={CARD_WIDTH + 16}
-              decelerationRate="fast"
-              pagingEnabled={false}
-              contentContainerStyle={{ paddingBottom: 20 }}
-            >
-              {suggestions.map((meal, index) => {
-  const isExpanded = expandedIndex === index;
-  const isUnavailable = meal.available === false;
-
-  return (
-    <TouchableOpacity
-      key={index}
-      style={[
-        styles.suggestionItemHorizontal,
-        { width: CARD_WIDTH },
-        isUnavailable && styles.unavailableCard,
-      ]}
-      activeOpacity={isUnavailable ? 1 : 0.9}
-      onPress={() => {
-        if (!isUnavailable) {
-          setExpandedIndex(isExpanded ? null : index);
-        }
+  {!isConnected ? (
+    <Text style={{ color: "#6b7280", marginTop: 10 }}>
+      Looks like you're offline. We'll load meal suggestions as soon as you're back online.
+    </Text>
+  ) : mealsLoading || tdee === null ? (
+    <View
+      style={{
+        width: CARD_WIDTH,
+        height: 140,
+        borderRadius: 16,
+        backgroundColor: "#e5e7eb",
+        alignSelf: "center",
+        marginTop: 20,
       }}
-    >
-      {meal.image && (
-        <View style={styles.imageContainer}>
-          <Image
-            source={{ uri: meal.image }}
-            style={[
-              styles.suggestionImage,
-              isUnavailable && { opacity: 0.5 }
-            ]}
-          />
-        </View>
-      )}
-      <View style={styles.suggestionText}>
-        <View style={styles.suggestionTopRow}>
-          <Text
-            style={[
-              styles.suggestionName,
-              isUnavailable && styles.unavailableText
-            ]}
-          >
-            {meal.mealName}
-          </Text>
-          <Ionicons name="star-outline" size={20} color="#facc15" />
-        </View>
+    />
+  ) : suggestions.length > 0 ? (
+    <View style={{ alignItems: "center", paddingVertical: 20 }}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        snapToInterval={CARD_WIDTH + 16}
+        decelerationRate="fast"
+        pagingEnabled={false}
+        contentContainerStyle={{ paddingBottom: 20 }}
+      >
+        {suggestions.map((meal, index) => {
+          const isExpanded = expandedIndex === index;
+          const isUnavailable = meal.available === false;
 
-        <Text
-          style={[
-            styles.suggestionCalories,
-            isUnavailable && styles.unavailableText
-          ]}
-        >
-          {meal.calories ?? 0} kcal
-        </Text>
+          return (
+            <TouchableOpacity
+              key={index}
+              style={[
+                styles.suggestionItemHorizontal,
+                { width: CARD_WIDTH },
+                isUnavailable && styles.unavailableCard,
+              ]}
+              activeOpacity={0.85}
+              onPress={() => {
+                if (!isUnavailable) setExpandedIndex(isExpanded ? null : index);
+              }}
+            >
+              {meal.image && (
+                <View style={styles.imageContainer}>
+                  <Image
+                    source={{ uri: meal.image }}
+                    style={[styles.suggestionImage, isUnavailable && { opacity: 0.5 }]}
+                  />
+                </View>
+              )}
 
-        {meal.description && (
-          <Text
-            style={[
-              styles.suggestionDescription,
-              !isExpanded && styles.suggestionDescriptionCollapsed,
-              isUnavailable && styles.unavailableText
-            ]}
-            numberOfLines={isExpanded ? undefined : 2}
-          >
-            {meal.description}
-          </Text>
-        )}
+              <View style={styles.suggestionText}>
+                <View style={styles.suggestionTopRow}>
+                  <Text
+                    style={[styles.suggestionName, isUnavailable && styles.unavailableText]}
+                  >
+                    {meal.mealName}
+                  </Text>
+                 <TouchableOpacity onPress={() => toggleFavorite(meal)} style={{ width: 28, alignItems: "center" }}>
+                    <Ionicons
+                      name={favorites[meal.id] ? "heart" : "heart-outline"}
+                      size={22}
+                      color={favorites[meal.id] ? "#22c55e" : "#9ca3af"} // Green if filled
+                    />
+                  </TouchableOpacity>
+                </View>
 
-        {isUnavailable ? (
-          <Text style={styles.unavailableLabel}>Unavailable</Text>
-        ) : (
-          <TouchableOpacity style={styles.logButton}>
-            <Text style={styles.logButtonText}>Add to Cart</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
-})}
+                <Text
+                  style={[styles.suggestionCalories, isUnavailable && styles.unavailableText]}
+                >
+                  {meal.calories ?? 0} kcal
+                </Text>
 
-            </ScrollView>
-          </View>
-        ) : (
-          <Text style={{ color: "#6b7280", marginTop: 10 }}>
-            No suggestions available.
-          </Text>
-        )}
-      </View>     
+                {meal.description && (
+                  <Text
+                    style={[styles.suggestionDescription, isUnavailable && styles.unavailableText]}
+                    numberOfLines={2}
+                    ellipsizeMode="tail"
+                  >
+                    {meal.description}
+                  </Text>
+                )}
+
+                {!isUnavailable && (
+                  <TouchableOpacity
+                    style={styles.logButton}
+                    activeOpacity={0.7}
+                    onPress={() => {
+                      nav.navigate("MealDetail", { meal });
+                    }}
+                  >
+                    <Text style={styles.logButtonText}>Order Now</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* Overlay the “Unavailable” label on top of everything */}
+              {isUnavailable && (
+                <View style={styles.unavailableLabelContainer}>
+                  <Text style={styles.unavailableLabel}>Unavailable</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+          );
+        })}
+      </ScrollView>
+    </View>
+  ) : (
+    <Text style={{ color: "#6b7280", marginTop: 10 }}>
+      No suggestions available.
+    </Text>
+  )}
+</View>
+
     </ScrollView>
 
     {/* Sidebar Modal */}
@@ -1000,6 +1062,7 @@ return (
 }
 
 const styles = StyleSheet.create({
+  // Containers
   container: { flex: 1, backgroundColor: "#f9fafb" },
   loadingContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
   content: { padding: 24, paddingTop: 48, paddingBottom: 100 },
@@ -1032,369 +1095,153 @@ const styles = StyleSheet.create({
     zIndex: 999,
   },
   sidebarBackdrop: { flex: 1 },
-sidebar: {
-  position: "absolute",
-  left: 0, // stay on left
-  top: 0,
-  bottom: 0,
-  width: SIDEBAR_WIDTH,
-  backgroundColor: "#ffffff",
-  padding: 20,
-  paddingTop: 40,
-  shadowColor: "#000",
-  shadowOffset: { width: 3, height: 0 },
-  shadowOpacity: 0.1,
-  shadowRadius: 10,
-  elevation: 10,
-  zIndex: 1000, // ensure it's on top
-},
-
-sidebarHeader: {
-  flexDirection: "row",
-  justifyContent: "space-between",
-  alignItems: "center",
-  marginBottom: 24,
-  borderBottomWidth: 1,
-  borderBottomColor: "#d1fae5",
-  paddingBottom: 12,
-},
-sidebarTitle: {
-  fontSize: 20,
-  fontWeight: "700",
-  color: "#14532d",
-},
-sidebarHeaderWithUser: {
-  flexDirection: "row",
-  justifyContent: "space-between",
-  alignItems: "center",
-  marginBottom: 24,
-  borderBottomWidth: 1,
-  borderBottomColor: "#d1fae5",
-  paddingBottom: 12,
-},
-sidebarUserInfo: {
-  flexDirection: "row",
-  alignItems: "center",
-},
-sidebarUserImage: {
-  width: 40,
-  height: 40,
-  borderRadius: 20,
-  backgroundColor: "#bbf7d0",
-  marginRight: 12,
-},
-sidebarUserName: {
-  fontSize: 18,
-  fontWeight: "bold",
-  fontWeight: "600",
-  color: "#14532d",
-},
-
-closeButton: {
-  backgroundColor: "#e5e7eb",       // Light green background
-  borderRadius: 20,
-  padding: 8,
-  shadowColor: "#000",
-  shadowOffset: { width: 0, height: 1 },
-  shadowOpacity: 0.1,
-  shadowRadius: 2,
-  elevation: 2,
-  color:"#ffffff"
-},
-
-sidebarItem: {
-  flexDirection: "row",
-  alignItems: "center",
-  paddingVertical: 14,
-  paddingHorizontal: 10,
-  borderRadius: 12,
-  marginBottom: 10,
-  backgroundColor: "#ffffff",
-  shadowColor: "#000",
-  shadowOpacity: 0.03,
-  shadowOffset: { width: 0, height: 1 },
-  shadowRadius: 3,
-  elevation: 1,
-},
-sidebarItemText: {
-  marginLeft: 12,
-  fontSize: 16,
-  fontWeight: "500",
-  color: "#14532d",
-},
+  sidebar: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: SIDEBAR_WIDTH,
+    backgroundColor: "#ffffff",
+    padding: 20,
+    paddingTop: 40,
+    shadowColor: "#000",
+    shadowOffset: { width: 3, height: 0 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 10,
+    zIndex: 1000,
+  },
+  sidebarHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: "#d1fae5",
+    paddingBottom: 12,
+  },
+  sidebarTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#14532d",
+  },
+  sidebarUserInfo: { flexDirection: "row", alignItems: "center" },
+  sidebarUserImage: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#bbf7d0", marginRight: 12 },
+  sidebarUserName: { fontSize: 18, fontWeight: "600", color: "#14532d" },
+  closeButton: {
+    backgroundColor: "#e5e7eb",
+    borderRadius: 20,
+    padding: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  sidebarItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    marginBottom: 10,
+    backgroundColor: "#ffffff",
+    shadowColor: "#000",
+    shadowOpacity: 0.03,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  sidebarItemText: { marginLeft: 12, fontSize: 16, fontWeight: "500", color: "#14532d" },
 
   // Date Navigation
-dateNav: {
-  flexDirection: "row",
-  alignItems: "center",
-  justifyContent: "space-between",
-  marginTop: 10,
-  marginBottom: 30,
-  width: "100%",
-},
-dateArrow: {
-  flex: 1,
-  alignItems: "center",
-},
-dateTextWrapper: {
-  flex: 2,
-  alignItems: "center",
-},
-dateText: {
-  fontSize: 18,
-  fontWeight: "bold",
-  color: "#14532d",
-},  
-  // Circle Progress
-  circleRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 32,
-  },
-  circleItem: {
-    alignItems: "center",
-    flex: 1,
-    backgroundColor: "transparent",
-  },
-  circleValueContainer: {
-    position: "absolute",
-    top: SIZE / 2 - 18,
-    left: 0,
-    right: 0,
-    alignItems: "center",
-  },
-  circleValue: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#111827",
-  },
-  unit: {
-    fontSize: 15,
-    color: "#6b7280",
-    marginTop: 2,
-  },
-  circleLabel: {
-    marginTop: 10,
-    fontSize: 14,
-    color: "#374151",
-  },
+  dateNav: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginVertical: 20, width: "100%" },
+  dateArrow: { flex: 1, alignItems: "center" },
+  dateTextWrapper: { flex: 2, alignItems: "center" },
+  dateText: { fontSize: 18, fontWeight: "bold", color: "#14532d" },
 
-  // Section Titles
+  // Circle Progress
+  circleRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 32 },
+  circleItem: { alignItems: "center", flex: 1, backgroundColor: "transparent" },
+  circleValueContainer: { position: "absolute", top: SIZE / 2 - 18, left: 0, right: 0, alignItems: "center" },
+  circleValue: { fontSize: 14, fontWeight: "bold", color: "#111827" },
+  unit: { fontSize: 15, color: "#6b7280", marginTop: 2 },
+  circleLabel: { marginTop: 10, fontSize: 14, color: "#374151" },
+
+  // Sections
   section: { marginBottom: 32 },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#14532d",
-    marginBottom: 5,
-  },
+  sectionTitle: { fontSize: 18, fontWeight: "bold", color: "#14532d", marginBottom: 5 },
 
   // Macros
-  macroRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  macroLabel: {
-    width: 70,
-    fontSize: 14,
-    color: "#4b5563",
-  },
-  progressBar: {
-    flex: 1,
-    height: 10,
-    backgroundColor: "#e5e7eb",
-    borderRadius: 5,
-    overflow: "hidden",
-    marginHorizontal: 10,
-  },
-  progressFill: {
-    height: "100%",
-    borderRadius: 5,
-  },
-  percent: {
-    width: 40,
-    textAlign: "right",
-    fontSize: 14,
-    color: "#374151",
-  },
+  macroRow: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
+  macroLabel: { width: 70, fontSize: 14, color: "#4b5563" },
+  progressBar: { flex: 1, height: 10, backgroundColor: "#e5e7eb", borderRadius: 5, overflow: "hidden", marginHorizontal: 10 },
+  progressFill: { height: "100%", borderRadius: 5 },
+  percent: { width: 40, textAlign: "right", fontSize: 14, color: "#374151" },
 
-  // Add Button
-  addButton: {
-    flexDirection: "row",
-    backgroundColor: "#22c55e",
-    paddingVertical: 14,
-    borderRadius: 12,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#22c55e",
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  addButtonText: {
-    color: "#fff",
-    fontWeight: "600",
-    fontSize: 16,
-    marginLeft: 8,
-  },
+  // Buttons
+  addButton: { flexDirection: "row", backgroundColor: "#22c55e", paddingVertical: 14, borderRadius: 12, justifyContent: "center", alignItems: "center", shadowColor: "#22c55e", shadowOpacity: 0.3, shadowRadius: 10, elevation: 4 },
+  addButtonText: { color: "#fff", fontWeight: "600", fontSize: 16, marginLeft: 8 },
+  logButton: { marginTop: 10, backgroundColor: "#22c55e", paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, alignSelf: "flex-start" },
+  logButtonText: { color: "#fff", fontSize: 13, fontWeight: "600" },
 
-  // Suggestions
-  suggestionItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    padding: 14,
-    borderRadius: 16,
-    marginBottom: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 3 },
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  suggestionItemHorizontal: {
-    width: screenWidth - 64,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    padding: 14,
-    borderRadius: 16,
-    marginRight: 16,
-    flexShrink: 0,
-    shadowColor: "#000",
-    shadowOpacity: 0.05,
-    shadowOffset: { width: 0, height: 3 },
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  imageContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: 12,
-    overflow: "hidden",
-    marginRight: 14,
-    backgroundColor: "#f3f4f6",
-  },
-  suggestionImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
-  suggestionText: {
-    flex: 1,
-    justifyContent: "center",
-  },
-  suggestionTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  suggestionName: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#111827",
-    marginBottom: 4,
-  },
-  suggestionCalories: {
-    fontSize: 14,
-    color: "#16a34a",
-    fontWeight: "500",
-  },
-  suggestionDescription: {
-    fontSize: 12,
-    color: "#6b7280",
-    marginTop: 4,
-  },
-  logButton: {
-    marginTop: 10,
-    backgroundColor: "#22c55e",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    alignSelf: "flex-start",
-  },
-  logButtonText: {
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "600",
-  },
+  // Suggestions / Cards
+  suggestionItem: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", padding: 14, borderRadius: 16, marginBottom: 14, shadowColor: "#000", shadowOpacity: 0.05, shadowOffset: { width: 0, height: 3 }, shadowRadius: 6, elevation: 2 },
+  suggestionItemHorizontal: { width: CARD_WIDTH, flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 16, padding: 14, marginRight: 16, flexShrink: 0, shadowColor: "#000", shadowOpacity: 0.05, shadowOffset: { width: 0, height: 3 }, shadowRadius: 6, elevation: 2, minHeight: 100 },
+  imageContainer: { 
+  width: 80, 
+  height: 80, 
+  borderRadius: 12, 
+  overflow: "hidden", 
+  marginRight: 14, 
+  backgroundColor: "#f3f4f6", 
+  justifyContent: "flex-start", // keep at top
+  alignItems: "center",         // keep horizontal center
+  alignSelf: "flex-start",      // <-- add this to align to top of parent row
+},
+
+  suggestionImage: { width: "100%", height: "100%", resizeMode: "cover"},
+suggestionText: { 
+  flex: 1, 
+  justifyContent: "flex-start", // text aligned to top
+  alignItems: "flex-start",
+  flexShrink: 1,
+},
+suggestionTopRow: { 
+  flexDirection: "row", 
+  justifyContent: "space-between", 
+  alignItems: "flex-start",
+  marginBottom: 4,
+  flexShrink: 0,          // prevents shrinking beyond content
+},
+suggestionName: { 
+  fontSize: 16, 
+  fontWeight: "600", 
+  color: "#111827", 
+  flex: 1,           // allows title to take remaining space
+  flexWrap: "wrap",  // enable wrapping if long text
+  marginRight: 8,    // spacing between title and icon
+  minWidth: 0,       // prevents overflow on Android
+},
+  suggestionCalories: { fontSize: 14, color: "#16a34a", fontWeight: "500" },
+  suggestionDescription: { fontSize: 12, color: "#6b7280", marginTop: 4 },
 
   // Carousel
-  carouselContent: {
-    paddingHorizontal: 24,
-  },
-  suggestionSection: {
-    width: "100%",
-    marginBottom: 32,
-  },
-  circleSkeleton: {
-  width: SIZE,
-  height: SIZE,
-  borderRadius: SIZE / 2,
-  backgroundColor: "#e5e7eb",
-  justifyContent: "center",
-  alignItems: "center",
-},
-skeletonText: {
-  fontSize: 14,
-  fontWeight: "bold",
-  color: "#9ca3af",
-},
-macroSkeletonRow: {
-  flexDirection: "row",
-  alignItems: "center",
-  marginBottom: 12,
-},
+  carouselContent: { paddingHorizontal: 24 },
+  suggestionSection: { width: "100%", marginBottom: 32 },
 
-macroSkeletonLabel: {
-  width: 70,
-  height: 14,
-  borderRadius: 4,
-  backgroundColor: "#e5e7eb",
-  marginRight: 10,
-},
+  // Skeletons
+  circleSkeleton: { width: SIZE, height: SIZE, borderRadius: SIZE / 2, backgroundColor: "#e5e7eb", justifyContent: "center", alignItems: "center" },
+  skeletonText: { fontSize: 14, fontWeight: "bold", color: "#9ca3af" },
+  macroSkeletonRow: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
+  macroSkeletonLabel: { width: 70, height: 14, borderRadius: 4, backgroundColor: "#e5e7eb", marginRight: 10 },
+  macroSkeletonBar: { flex: 1, height: 10, borderRadius: 5, backgroundColor: "#e5e7eb", marginRight: 10 },
+  macroSkeletonValue: { width: 40, height: 14, borderRadius: 4, backgroundColor: "#e5e7eb" },
 
-macroSkeletonBar: {
-  flex: 1,
-  height: 10,
-  borderRadius: 5,
-  backgroundColor: "#e5e7eb",
-  marginRight: 10,
-},
-
-macroSkeletonValue: {
-  width: 40,
-  height: 14,
-  borderRadius: 4,
-  backgroundColor: "#e5e7eb",
-},
-unavailableCard: {
-  backgroundColor: "#E8E8E8 ",
-  opacity: 0.6,
-},
-
-unavailableText: {
-  color: "#888",
-},
-
-unavailableLabel: {
-  position: 'absolute',
-  top: '50%',
-  left: '50%',
-  transform: [{ translateX: -100 }, { translateY: -15 }], // adjust for longer text
-  color: '#ffffff',
-  fontWeight: 'bold',
-  fontSize: 17.7,
-  paddingVertical: 8,
-  paddingHorizontal: 16,
-  borderRadius: 10,
-  textAlign: 'center',
-  maxWidth: 200,  // limit width for readability
-  overflow: 'hidden',
-  zIndex: 2,
-},
-
-
-
+  // Unavailable state
+  unavailableCard: { backgroundColor: "#E8E8E8", opacity: 0.6 },
+  unavailableText: { color: "#888" },
+  unavailableLabelContainer: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "center", alignItems: "center", zIndex: 2 },
+  unavailableLabel: { color: "#000", fontWeight: "bold", fontSize: 17, textAlign: "center" },
 });
+
