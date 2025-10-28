@@ -41,7 +41,7 @@ export default function LandingPage({ navigation }) {
     <View style={styles.container}>
       {/* Animated Logo */}
       <Animated.Image
-        source={require("../../../assets/android/NutriFitLogo.png")}
+        source={require("../../../assets/NutriFitLogo.png")}
         style={[styles.logo, { opacity: logoOpacity }]}
         resizeMode="contain"
       />

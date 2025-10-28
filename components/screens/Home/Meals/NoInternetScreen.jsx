@@ -42,7 +42,7 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: 16,
-    color: '#6b7280',
+    color: '#555555',
     textAlign: 'center',
     marginBottom: 20,
   },

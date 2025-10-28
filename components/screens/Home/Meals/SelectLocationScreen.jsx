@@ -248,7 +248,7 @@ const SelectionLocationScreen = () => {
             }}
           >
             <Animated.View style={{ transform: [{ scale: bounceAnim }] }}>
-              <Ionicons name="location-sharp" size={40} color="#14532d" />
+              <Ionicons name="location-sharp" size={40} color="#D22B2B" />
             </Animated.View>
           </Mapbox.PointAnnotation>
         )}
@@ -262,28 +262,33 @@ const SelectionLocationScreen = () => {
 <TouchableOpacity
   style={styles.confirmBtn}
   onPress={async () => {
-    if (userLocation && selectedAddress) {
-      try {
-        // Save to AsyncStorage
-        await AsyncStorage.setItem("userCoords", JSON.stringify(userLocation));
-        await AsyncStorage.setItem("userAddress", selectedAddress.displayName);
+    // If no location is selected, just go back
+    if (!userLocation || !selectedAddress) {
+      navigation.goBack();
+      return;
+    }
 
-        // Navigate back to MainTabs -> Order
-        navigation.navigate("MainTabs", {
-          screen: "Order",
-          params: {
-            coords: userLocation,
-            address: selectedAddress.displayName,
-          },
-        });
-      } catch (err) {
-        console.error("Error saving address:", err);
-      }
+    try {
+      // Save to AsyncStorage
+      await AsyncStorage.setItem("userCoords", JSON.stringify(userLocation));
+      await AsyncStorage.setItem("userAddress", selectedAddress.displayName);
+
+      // Navigate back to MainTabs -> Order
+      navigation.navigate("MainTabs", {
+        screen: "Order",
+        params: {
+          coords: userLocation,
+          address: selectedAddress.displayName,
+        },
+      });
+    } catch (err) {
+      console.error("Error saving address:", err);
     }
   }}
 >
   <Text style={styles.confirmText}>Confirm</Text>
 </TouchableOpacity>
+
 
 
     {/* Current Location Button */}

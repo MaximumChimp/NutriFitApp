@@ -17,7 +17,7 @@
         "expo-splash-screen",
         {
           "resizeMode": "contain",
-          "backgroundColor": "#d4fc79",
+          "backgroundColor": "#FFFFFF",
           "android": {
             "userInterfaceStyle": "light",
             "resizeMode": "cover",
@@ -29,7 +29,7 @@
       [
         "@rnmapbox/maps",
         {
-          "RNMapboxMapsDownloadToken": "sk.eyJ1IjoibWF4bWNoaW1wIiwiYSI6ImNtZXZjbzF6YTBhejQya3F4bnNzYXZkcXYifQ.AoORvwLEgO_QUxib68-kQg"
+          "RNMapboxMapsDownloadToken": "sk.eyJ1IjoibWF4aW11bWNoaW1wIiwiYSI6ImNtZzd4dmtjYTAxYzAyaXM2NnJkY21uZnIifQ.jT8bnMXcKwPw8we0a30nRQ"
         }
       ]
     ],
@@ -62,7 +62,7 @@
     },
     "owner": "maximumchimp",
     "splash": {
-      "backgroundColor": "#d4fc79"
+      "backgroundColor": "#FFFFFF"
     }
   }
 }

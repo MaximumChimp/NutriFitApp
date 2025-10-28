@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react"; 
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   FlatList,
-  Image,
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,77 +14,39 @@ import { app } from "../../../../config/firebase-config";
 
 const db = getFirestore(app);
 
-const PAYMENT_METHODS_STATIC = {
-  card: {
-    label: "Credit / Debit Card",
-    image: require("../../../../assets/payments/Card.png"),
-  },
-  gcash: {
-    label: "GCash",
-    image: require("../../../../assets/payments/Gcash.png"),
-  },
-  paypal: {
-    label: "PayPal",
-    image: require("../../../../assets/payments/Paypal.png"),
-  },
-  cod: {
-    label: "Cash on Delivery",
-    image: null,
-  },
-};
-
 export default function PaymentMethodScreen({ navigation, route }) {
   const {
     cartItems = [],
     totalPrice = 0,
     deliveryAddress = "",
-    deliveryCoords = { latitude: null, longitude: null },
+    deliveryCoords = {},
+    selectedMeal = null,
   } = route.params || {};
 
-  const [selected, setSelected] = useState(null);
-  const [methods, setMethods] = useState([]);
+  const [methods, setMethods] = useState([
+    { id: "cod", label: "Cash on Delivery", enabled: true },
+    { id: "gcash", label: "GCash", enabled: true },
+  ]);
   const [loading, setLoading] = useState(true);
-
-  const mealNames = cartItems.map((item) => item.mealName);
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => {
-    console.log("[DEBUG] route.params:", route.params);
-
-    // Build fallback list from static config
-    const initialMethods = Object.entries(PAYMENT_METHODS_STATIC).map(
-      ([id, cfg]) => ({
-        id,
-        label: cfg.label,
-        image: cfg.image,
-        enabled: true,
-      })
-    );
-    setMethods(initialMethods);
-
     const unsubscribe = onSnapshot(
       collection(db, "payment"),
       (snapshot) => {
-        const updated = [...initialMethods];
-
+        const updated = [...methods];
         snapshot.forEach((doc) => {
           const id = doc.id.toLowerCase();
-          const data = doc.data();
-          const enabled = data?.enabled ?? true;
-
           const idx = updated.findIndex((m) => m.id === id);
           if (idx !== -1) {
-            updated[idx] = { ...updated[idx], enabled };
-          } else {
-            console.warn(`Payment method '${id}' not found in static config`);
+            updated[idx] = { ...updated[idx], ...doc.data(), enabled: doc.data().enabled ?? true };
           }
         });
-
-        console.log("[DEBUG] methods after snapshot:", updated);
         setMethods(updated);
         setLoading(false);
       },
       (err) => {
-        console.error("[FIRESTORE ERROR]", err);
+        console.error(err);
         setLoading(false);
       }
     );
@@ -93,34 +54,107 @@ export default function PaymentMethodScreen({ navigation, route }) {
     return () => unsubscribe();
   }, []);
 
-  const handleConfirm = async () => {
-    if (!selected) return;
+  const handleSelect = (id) => setSelected(id);
 
-    try {
-      const simplifiedCart = cartItems.map((item) => ({
-        mealName: item.mealName,
-        price: item.price,
-        quantity: item.quantity || 1,
-      }));
+const handleContinue = async () => {
+  if (!selected) return;
 
-      await AsyncStorage.multiSet([
-        ["cartMeals", JSON.stringify(simplifiedCart)],
-        ["paymentMethod", selected],
-        ["totalPrice", totalPrice.toString()],
-        ["deliveryAddress", deliveryAddress],
-      ]);
+  // Generate a single orderId for this transaction if none exists
+  const orderId = selectedMeal?.orderId || cartItems[0]?.orderId ;
 
-      navigation.navigate("ConfirmOrder", {
-        cartMeals: simplifiedCart,
-        totalPrice,
-        deliveryAddress,
-        paymentMethod: selected,
-        location: deliveryCoords,
-      });
-    } catch (err) {
-      console.error("Error saving to AsyncStorage:", err);
-    }
-  };
+  let simplifiedCart = [];
+  let finalTotal = totalPrice;
+
+  if (selectedMeal) {
+    simplifiedCart = [
+      {
+        mealName: selectedMeal.mealName,
+        price: selectedMeal.price,
+        quantity: 1,
+        specialInstructions: selectedMeal.specialInstructions || "",
+        calories: selectedMeal.calories || 0,
+        protein: selectedMeal.protein || 0,
+        carbs: selectedMeal.carbs || 0,
+        fat: selectedMeal.fat || 0,
+        orderId, // always include orderId
+      },
+    ];
+    finalTotal = selectedMeal.price;
+  } else {
+    simplifiedCart = cartItems.map((item) => ({
+      mealName: item.mealName,
+      price: item.price,
+      quantity: item.quantity || 1,
+      specialInstructions: item.specialInstructions || "",
+      calories: item.calories || 0,
+      protein: item.protein || 0,
+      carbs: item.carbs || 0,
+      fat: item.fat || 0,
+      orderId, // reuse the same orderId for all items
+    }));
+  }
+
+  // Save to AsyncStorage
+  await AsyncStorage.multiSet([
+    ["cartMeals", JSON.stringify(simplifiedCart)],
+    ["paymentMethod", selected],
+    ["totalPrice", finalTotal.toString()],
+    ["deliveryAddress", deliveryAddress],
+  ]);
+
+  // Navigate
+  if (selected === "gcash") {
+    navigation.navigate("GcashPayment", {
+      cartMeals: simplifiedCart,
+      totalPrice: finalTotal,
+      deliveryAddress,
+      location: deliveryCoords,
+      paymentMethod: selected,
+      orderId, // always pass
+    });
+  } else {
+    navigation.navigate("ConfirmOrder", {
+      cartMeals: simplifiedCart,
+      totalPrice: finalTotal,
+      deliveryAddress,
+      location: deliveryCoords,
+      paymentMethod: selected,
+      orderId, // optional for COD
+    });
+  }
+};
+
+useEffect(() => {
+  console.log("🛒 Cart items received in PaymentMethodScreen:");
+  if (cartItems.length > 0) {
+    cartItems.forEach((item, index) => {
+      console.log(
+        `   #${index + 1}`,
+        "\n   Meal Name:", item.mealName,
+        "\n   Price:", item.price,
+        "\n   Quantity:", item.quantity || 1,
+        "\n   Calories:", item.calories || 0,
+        "\n   Order ID:", item.orderId || "(no orderId)"
+      );
+    });
+  } else {
+    console.log("   No cart items received (possibly single meal order).");
+  }
+
+  if (selectedMeal) {
+    console.log("🍽 Selected single meal details:");
+    console.log({
+      mealName: selectedMeal.mealName,
+      price: selectedMeal.price,
+      calories: selectedMeal.calories,
+      orderId: selectedMeal.orderId || "(no orderId)",
+    });
+  }
+
+  console.log("💰 Total Price:", totalPrice);
+  console.log("📍 Delivery Address:", deliveryAddress);
+  console.log("📌 Delivery Coords:", deliveryCoords);
+}, []);
 
   const renderItem = ({ item }) => {
     const isDisabled = !item.enabled;
@@ -128,110 +162,92 @@ export default function PaymentMethodScreen({ navigation, route }) {
 
     return (
       <TouchableOpacity
+        activeOpacity={isDisabled ? 1 : 0.7}
+        onPress={() => !isDisabled && handleSelect(item.id)}
         style={[
           styles.option,
           isSelected && styles.optionSelected,
           isDisabled && styles.optionDisabled,
+          !isSelected && styles.optionNoShadow,
         ]}
-        onPress={() => !isDisabled && setSelected(item.id)}
-        activeOpacity={isDisabled ? 1 : 0.7}
       >
-        <Ionicons
-          name={isSelected ? "radio-button-on" : "radio-button-off"}
-          size={24}
-          color={isDisabled ? "#aaa" : "#14532d"}
-          style={{ marginRight: 12 }}
-        />
-        {item.image && (
-          <Image
-            source={item.image}
-            style={[styles.optionImage, isDisabled && { opacity: 0.4 }]}
-          />
-        )}
-        <Text style={[styles.optionText, isDisabled && { color: "#aaa" }]}>
-          {item.label}
-        </Text>
+        <Text style={[styles.optionText, isDisabled && { color: "#aaa" }]}>{item.label}</Text>
       </TouchableOpacity>
     );
   };
 
-  if (loading && methods.length === 0) {
+  if (loading) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#14532d" />
+      <View style={styles.loaderContainer}>
+        <ActivityIndicator size="large" color="#22c55e" />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      {/* Back Button */}
+      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <Ionicons name="arrow-back" size={24} color="#111827" />
+        <Text style={styles.backText}>Back</Text>
+      </TouchableOpacity>
+
       <Text style={styles.title}>Select Payment Method</Text>
 
-      {methods.length === 0 ? (
-        <Text style={styles.emptyText}>
-          No payment methods available at the moment.
-        </Text>
-      ) : (
-        <FlatList
-          data={methods}
-          renderItem={renderItem}
-          keyExtractor={(item) => item.id}
-        />
-      )}
+      <FlatList
+        data={methods}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+        contentContainerStyle={{ paddingBottom: 30 }}
+      />
 
+      {/* Continue Button */}
       <TouchableOpacity
-        style={[styles.confirmButton, !selected && { opacity: 0.5 }]}
-        onPress={handleConfirm}
+        style={[styles.continueButton, !selected && { opacity: 0.6 }]}
         disabled={!selected}
+        onPress={handleContinue}
       >
-        <Text style={styles.confirmButtonText}>Continue</Text>
+        <Text style={styles.continueButtonText}>Continue</Text>
       </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: "#ffffff", paddingTop: 50 },
-  title: { fontSize: 24, fontWeight: "bold", marginBottom: 20, color: "#14532d" },
+  container: { flex: 1, padding: 20, backgroundColor: "#f9fafb", paddingTop: 50 },
+  loaderContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  backButton: { flexDirection: "row", alignItems: "center", marginBottom: 24 },
+  backText: { marginLeft: 8, fontSize: 16, fontWeight: "500", color: "#111827" },
+  title: { fontSize: 24, fontWeight: "700", color: "#555555", marginBottom: 20 },
+
   option: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 14,
-    marginBottom: 12,
     backgroundColor: "#fff",
-    borderRadius: 8,
+    padding: 16,
+    borderRadius: 16,
+    justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#ccc",
+    borderColor: "#d1d5db",
   },
   optionSelected: {
-    borderColor: "#14532d",
+    borderColor: "#22c55e",
+    shadowColor: "#000",
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 3 },
+    shadowRadius: 6,
+    elevation: 3,
   },
-  optionDisabled: {
-    opacity: 0.6,
-  },
-  optionImage: {
-    width: 36,
-    height: 36,
-    resizeMode: "contain",
-    marginRight: 10,
-  },
-  optionText: {
-    fontSize: 16,
-  },
-  emptyText: {
-    textAlign: "center",
-    marginTop: 20,
-    color: "#888",
-  },
-  confirmButton: {
-    marginTop: 30,
+  optionDisabled: { opacity: 0.6 },
+  optionText: { fontSize: 16, fontWeight: "600", color: "#111827", textAlign: "center" },
+  optionNoShadow: { shadowOpacity: 0, elevation: 0 },
+
+  continueButton: {
     backgroundColor: "#22c55e",
-    paddingVertical: 14,
-    borderRadius: 8,
+    paddingVertical: 16,
+    borderRadius: 16,
     alignItems: "center",
+    marginTop: 20,
+    elevation: 3,
   },
-  confirmButtonText: {
-    color: "white",
-    fontWeight: "bold",
-  },
+  continueButtonText: { color: "#fff", fontWeight: "700", fontSize: 16 },
 });

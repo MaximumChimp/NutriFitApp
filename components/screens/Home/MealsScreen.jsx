@@ -9,7 +9,10 @@ import {
   Alert,
   Platform,
   ActivityIndicator,
-  RefreshControl 
+  RefreshControl,
+  Modal, 
+  FlatList,
+  DeviceEventEmitter 
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,6 +23,7 @@ import moment from 'moment';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { useMealUpdate } from '../../context/MealUpdateContext';
 import ShowStreakAnimation from './ShowStreakScreen';
+import { getAuth } from "firebase/auth";
 export default function MealsScreen() {
   const navigation = useNavigation();
   const [activeTab, setActiveTab] = useState('Breakfast');
@@ -27,13 +31,23 @@ export default function MealsScreen() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [viewMode, setViewMode] = useState('weekly');
-  const [isCompactView, setIsCompactView] = useState(false);
+  const [isCompactView, setIsCompactView] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [showStreakAnimation, setShowStreakAnimation] = useState(false);
   const { triggerMealUpdate } = useMealUpdate();
   const tabs = ['Breakfast', 'Lunch', 'Dinner'];
   const [streakCount, setStreakCount] = useState(0);
+  const [orderedMeals, setOrderedMeals] = useState([]);
+  const [showOrderedModal, setShowOrderedModal] = useState(false);
+
+  const getMealTypeByTime = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 11) return 'Breakfast';
+    if (hour >= 11 && hour < 17) return 'Lunch';
+    return 'Dinner';
+  };
+
   const getWeekRange = (date) => {
     const start = moment(date).startOf('week');
     const end = moment(date).endOf('week');
@@ -60,6 +74,11 @@ export default function MealsScreen() {
     setRefreshing(false);
   }
 };
+
+useEffect(() => {
+  const defaultMealType = getMealTypeByTime();
+  setActiveTab(defaultMealType);
+}, []);
 
 useEffect(() => {
   if (userMeals.some((m) => moment(m.createdAt).isSame(moment(), 'day'))) {
@@ -124,25 +143,27 @@ useFocusEffect(
       const allTabs = ['Breakfast', 'Lunch', 'Dinner'];
       let hasTodayMeal = false;
 
+      // 🟢 1️⃣ Check manually logged meals
       for (const tab of allTabs) {
         const key = `${uid}_loggedMeals_${tab}`;
         const stored = await AsyncStorage.getItem(key);
         const meals = stored ? JSON.parse(stored) : [];
 
-        if (
-          meals.some((m) => moment(m.createdAt).isSame(moment(), 'day'))
-        ) {
+        if (meals.some((m) => moment(m.createdAt).isSame(moment(), 'day'))) {
           hasTodayMeal = true;
           break;
         }
       }
 
+      // 🟢 2️⃣ If any logged meal exists today, update streak
       if (hasTodayMeal) {
         const result = await checkAndUpdateStreak();
         if (result?.updated) {
           setStreakCount(result.count);
           setShowStreakAnimation(true);
-          console.log(`🔥 Streak ${result.continued ? 'continued' : 'started'}: ${result.count} days`);
+          console.log(
+            `🔥 Streak ${result.continued ? 'continued' : 'started'}: ${result.count} days`
+          );
         }
       }
     };
@@ -151,8 +172,71 @@ useFocusEffect(
   }, [])
 );
 
+// 🔹 Separate effect for locally saved ordered meals
+useEffect(() => {
+  const updateStreakFromOrderedMeals = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    const orderedKey = `${uid}_orderedMeals`;
+    const orderedData = await AsyncStorage.getItem(orderedKey);
+    if (!orderedData) return;
+
+    // We can still load the data if needed, but don't trigger streak updates
+    const orderedMeals = JSON.parse(orderedData);
+    const hasTodayOrdered = orderedMeals.some(
+      (m) => m.date === moment().format('YYYY-MM-DD')
+    );
+
+    // ❌ Removed streak update logic
+    console.log('Ordered meals found for today:', hasTodayOrdered);
+  };
+
+  updateStreakFromOrderedMeals();
+}, []);
 
 
+useEffect(() => {
+  const fetchOrderedMeals = async () => {
+    try {
+      const user = getAuth().currentUser;
+      if (!user) return;
+
+      const key = `${user.uid}_orderedMeals`;
+      const stored = await AsyncStorage.getItem(key);
+
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setOrderedMeals(parsed); // ✅ Save to state
+      } else {
+        setOrderedMeals([]); // No data
+      }
+    } catch (error) {
+      console.error("❌ Error fetching ordered meals:", error);
+    }
+  };
+
+  fetchOrderedMeals();
+}, []);
+
+useEffect(() => {
+  const handleOrderedMealsChange = async () => {
+    const user = getAuth().currentUser;
+    if (!user) return;
+
+    const key = `${user.uid}_orderedMeals`;
+    const stored = await AsyncStorage.getItem(key);
+    setOrderedMeals(stored ? JSON.parse(stored) : []);
+  };
+
+  // 🟢 Listen using DeviceEventEmitter
+  const subscription = DeviceEventEmitter.addListener('orderedMealsUpdated', handleOrderedMealsChange);
+
+  // 🧹 Cleanup
+  return () => {
+    subscription.remove();
+  };
+}, []);
 
   
 const loadLocalMeals = async () => {
@@ -381,35 +465,29 @@ const handleDeleteMeal = async (meal) => {
         ))}
       </View>
 
-      <View style={styles.calendarRow}>
-        <TouchableOpacity style={styles.calendarButton} onPress={() => setShowDatePicker(true)}>
-          <Ionicons name="calendar-outline" size={20} color="#14532d" />
-          <Text style={styles.calendarText}>
-            {viewMode === 'weekly'
-              ? `Week of ${moment(selectedDate).startOf('week').format('MMM D')}`
-              : moment(selectedDate).format('MMMM D, YYYY')}
-          </Text>
-        </TouchableOpacity>
+<View style={styles.calendarRow}>
+  <TouchableOpacity style={styles.calendarButton} onPress={() => setShowDatePicker(true)}>
+    <Ionicons name="calendar-outline" size={20} color="#555555" />
+    <Text style={styles.calendarText}>
+      {viewMode === 'weekly'
+        ? `Week ${moment(selectedDate).week()}` // <-- changed to show week number
+        : moment(selectedDate).format('MMMM D, YYYY')}
+    </Text>
+  </TouchableOpacity>
 
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <TouchableOpacity
-            onPress={() => setViewMode(viewMode === 'weekly' ? 'daily' : 'weekly')}
-            style={styles.viewToggleButton}
-          >
-            <Ionicons name="repeat-outline" size={16} color="#14532d" />
-            <Text style={styles.viewToggleText}>
-              {viewMode === 'weekly' ? 'Daily' : 'Weekly'}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setIsCompactView((prev) => !prev)}
-            style={styles.viewToggleButton}
-          >
-            <Ionicons name={isCompactView ? 'grid-outline' : 'list-outline'} size={16} color="#14532d" />
-            <Text style={styles.viewToggleText}>{isCompactView ? 'Cards' : 'Compact'}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+  <View style={{ flexDirection: 'row', gap: 8 }}>
+    <TouchableOpacity
+      onPress={() => setViewMode(viewMode === 'weekly' ? 'daily' : 'weekly')}
+      style={styles.viewToggleButton}
+    >
+      <Ionicons name="repeat-outline" size={16} color="#555555" />
+      <Text style={styles.viewToggleText}>
+        {viewMode === 'weekly' ? 'Daily' : 'Weekly'}
+      </Text>
+    </TouchableOpacity>
+  </View>
+</View>
+
 
       {showDatePicker && (
         <DateTimePicker
@@ -481,6 +559,8 @@ const handleDeleteMeal = async (meal) => {
       )}
 
 
+
+
       <TouchableOpacity
         style={styles.floatingButton}
         onPress={() => navigation.navigate('LogFoodModal')}
@@ -488,6 +568,94 @@ const handleDeleteMeal = async (meal) => {
         <Ionicons name="add" size={24} color="#fff" />
         <Text style={styles.floatingText}>Log Food</Text>
       </TouchableOpacity>
+
+      {orderedMeals.length > 0 && (
+        <TouchableOpacity
+          style={styles.orderedBanner}
+          onPress={() => setShowOrderedModal(true)}
+        >
+          <Ionicons name="restaurant-outline" size={18} color="#555555" />
+          <Text style={styles.orderedBannerText}>
+            You have {orderedMeals.length} ordered meal{orderedMeals.length > 1 ? 's' : ''}!
+          </Text>
+        </TouchableOpacity>
+      )}
+
+
+<Modal
+  visible={showOrderedModal}
+  animationType="fade"
+  transparent={true}
+  onRequestClose={() => setShowOrderedModal(false)}
+>
+  <View style={styles.modalOverlay}>
+    <View style={styles.modalContainer}>
+      {/* Header */}
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalTitle}>Ordered Meals</Text>
+        <TouchableOpacity
+          style={styles.closeButton}
+          onPress={() => setShowOrderedModal(false)}
+        >
+          <Ionicons name="close" size={18} color="#374151" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Content */}
+      {orderedMeals.length === 0 ? (
+        <Text style={styles.emptyText}>No ordered meals found.</Text>
+      ) : (
+        <FlatList
+          data={orderedMeals}
+          keyExtractor={(item, index) => index.toString()}
+          contentContainerStyle={{ paddingBottom: 10 }}
+renderItem={({ item, index }) => (
+  <TouchableOpacity
+    onPress={() => {
+      navigation.navigate('LogFoodModal', {
+        mealData: {
+          name: item.mealName,
+          calories: item.calories,
+          macros: {
+            protein: item.protein,
+            carbs: item.carbs,
+            fat: item.fat,
+          },
+          mealType: item.mealType || 'Lunch',
+        },
+        mealIndex: index, // ✅ still pass index for removal later
+      });
+      setShowOrderedModal(false);
+    }}
+  >
+    <View style={styles.orderedCard}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.orderedName}>
+          {item.mealName || 'Unnamed Meal'}
+        </Text>
+        <Text style={styles.orderedCalories}>{item.calories} kcal</Text>
+        <View style={styles.macroRow}>
+          <Text style={styles.macroText}>Protein: {item.protein}g</Text>
+          <Text style={styles.macroText}>Carbs: {item.carbs}g</Text>
+          <Text style={styles.macroText}>Fat: {item.fat}g</Text>
+        </View>
+        <Text style={styles.orderedDate}>
+          {item.date} {item.time ? `• ${item.time}` : ''}
+        </Text>
+      </View>
+    </View>
+  </TouchableOpacity>
+)}
+
+        />
+
+      )}
+    </View>
+  </View>
+</Modal>
+
+
+
     </View>
   );
 }
@@ -502,7 +670,7 @@ const styles = StyleSheet.create({
   header: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#14532d',
+    color: '#555555',
     marginBottom: 16,
   },
   tabContainer: {
@@ -546,7 +714,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 14,
     fontWeight: '500',
-    color: '#14532d',
+    color: '#555555',
   },
   viewToggleButton: {
     flexDirection: 'row',
@@ -558,7 +726,7 @@ const styles = StyleSheet.create({
   },
   viewToggleText: {
     marginLeft: 6,
-    color: '#14532d',
+    color: '#555555',
     fontSize: 14,
     fontWeight: '500',
   },
@@ -599,7 +767,7 @@ const styles = StyleSheet.create({
   mealName: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#14532d',
+    color: '#555555',
   },
   description: {
     fontSize: 14,
@@ -663,7 +831,7 @@ headerRow: {
 header: {
   fontSize: 24,
   fontWeight: '700',
-  color: '#14532d',
+  color: '#555555',
 },
 saveButton: {
   flexDirection: 'row',
@@ -699,6 +867,111 @@ streakText: {
   color: 'white',
   fontSize: 16,
   fontWeight: 'bold',
-}
+},
+orderedBanner: {
+  position: 'absolute',
+  bottom: 90,
+  left: 24,
+  right: 24,
+  backgroundColor: '#fef9c3',
+  borderColor: '#fde047',
+  borderWidth: 1,
+  borderRadius: 14,
+  paddingVertical: 10,
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  shadowColor: '#000',
+  shadowOpacity: 0.15,
+  shadowRadius: 6,
+  elevation: 5,
+},
+orderedBannerText: {
+  color: '#555555',
+  fontWeight: '600',
+  marginLeft: 6,
+  fontSize: 14,
+},
+modalOverlay: {
+  flex: 1,
+  backgroundColor: 'rgba(0,0,0,0.4)',
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+modalContainer: {
+  width: '90%',
+  maxHeight: '80%',
+  backgroundColor: '#f9fafb',
+  borderRadius: 4,
+  padding: 16,
+  shadowColor: '#000',
+  shadowOpacity: 0.2,
+  shadowRadius: 10,
+  elevation: 6,
+},
+modalHeader: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  marginBottom: 10,
+},
+modalTitle: {
+  fontSize: 18,
+  fontWeight: '700',
+  color: '#111827',
+},
+closeButton: {
+  backgroundColor: '#e5e7eb',
+  width: 30,
+  height: 30,
+  borderRadius: 15,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+orderedCard: {
+  backgroundColor: '#fff',
+  borderRadius: 4,
+  padding: 12,
+  marginBottom: 10,
+  shadowColor: '#000',
+  shadowOpacity: 0.08,
+  shadowRadius: 4,
+  elevation: 3,
+  borderWidth: 1,
+  borderColor: '#f3f4f6',
+},
+
+orderedName: {
+  fontSize: 16,
+  fontWeight: '600',
+  color: '#111827',
+  marginBottom: 2,
+},
+orderedCalories: {
+  fontSize: 14,
+  color: '#ef4444',
+  marginBottom: 4,
+},
+macroRow: {
+  flexDirection: 'row',
+  flexWrap: 'wrap',
+  gap: 10,
+  marginVertical: 2,
+},
+macroText: {
+  fontSize: 12,
+  color: '#374151',
+},
+orderedDate: {
+  fontSize: 12,
+  color: '#6b7280',
+  marginTop: 2,
+},
+emptyText: {
+  textAlign: 'center',
+  color: '#6b7280',
+  marginTop: 30,
+  fontSize: 14,
+},
 
 });

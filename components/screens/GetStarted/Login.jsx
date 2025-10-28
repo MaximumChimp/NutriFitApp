@@ -12,11 +12,28 @@ import {
   Platform,
   TouchableWithoutFeedback,
   Keyboard,
+  Alert 
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-
-import { auth } from "@/config/firebase-config";
-import { signInWithEmailAndPassword } from "firebase/auth";
+import {
+  getDatabase,
+  ref,
+  set,
+  onDisconnect,
+  onValue
+} from "firebase/database";
+import { signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { auth, db } from "../../../config/firebase-config";
+import {
+  doc,
+  getDoc,
+  updateDoc,
+  collection,
+  query,
+  where,
+  getDocs,
+} from "firebase/firestore";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
@@ -28,12 +45,13 @@ export default function LoginScreen({ navigation }) {
   const [passwordError, setPasswordError] = useState("");
   const [firebaseError, setFirebaseError] = useState("");
 
+  // --- Form Validation ---
   const validateForm = () => {
     setEmailError("");
     setPasswordError("");
     setFirebaseError("");
-
     let isValid = true;
+
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     if (!email) {
@@ -52,27 +70,104 @@ export default function LoginScreen({ navigation }) {
     return isValid;
   };
 
-  const handleLogin = async () => {
-    if (!validateForm()) return;
+// --- Login Handler ---
+const handleLogin = async () => {
+  if (!validateForm()) return;
 
-    setLoading(true);
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-      // ✅ Navigate to home or dashboard
-      navigation.replace("MainTabs");
-    } catch (error) {
-      console.error("Login error:", error);
-      if (error.code === "auth/user-not-found") {
-        setFirebaseError("No account found with this email.");
-      } else if (error.code === "auth/wrong-password") {
-        setFirebaseError("Incorrect password.");
-      } else {
-        setFirebaseError(error.message || "Something went wrong.");
-      }
-    } finally {
+  setLoading(true);
+  setFirebaseError("");
+
+  try {
+    // 🔍 Step 1: Find user document by email before signing in
+    const usersRef = collection(db, "users");
+    const q = query(usersRef, where("email", "==", email));
+    const querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty) {
+      setFirebaseError("No account found with this email.");
       setLoading(false);
+      return;
     }
-  };
+
+    const userDoc = querySnapshot.docs[0];
+    const userData = userDoc.data();
+
+    if (userData.status === "blocked") {
+      Alert.alert(
+        "Account Blocked",
+        "Your account has been blocked. Please contact support for assistance."
+      );
+      setLoading(false);
+      return; // 🚫 Stop here — don't log in
+    }
+
+    // ✅ Step 2: Sign in only if not blocked
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+
+    // ✅ Update Firestore status to active
+    const userRef = doc(db, "users", user.uid);
+    await updateDoc(userRef, { status: "active" });
+
+    // ✅ Extract createdAt (convert Firestore timestamp if needed)
+    let createdAtValue = "";
+    if (userData.createdAt) {
+      if (userData.createdAt.toDate) {
+        // Firestore Timestamp
+        createdAtValue = userData.createdAt.toDate().toISOString();
+      } else if (typeof userData.createdAt === "string") {
+        // Already in string form
+        createdAtValue = userData.createdAt;
+      } else {
+        // Fallback
+        createdAtValue = new Date().toISOString();
+      }
+    } else {
+      createdAtValue = new Date().toISOString();
+    }
+
+    // ✅ Save to AsyncStorage (cache basic profile info including createdAt)
+    const cachedProfile = {
+      uid: user.uid,
+      firstName: userData.firstName || "",
+      lastName: userData.lastName || "",
+      email: userData.email || email, // fallback
+      phone: userData.phone || "",
+      createdAt: createdAtValue,       // ✅ added createdAt
+    };
+    await AsyncStorage.setItem("userProfile", JSON.stringify(cachedProfile));
+
+    // ✅ Set presence in RTDB
+    const rtdb = getDatabase();
+    const userStatusRef = ref(rtdb, `/availability/${user.uid}`);
+    const connectedRef = ref(rtdb, ".info/connected");
+
+    onValue(connectedRef, (snapshot) => {
+      if (snapshot.val() === true) {
+        set(userStatusRef, {
+          state: "online",
+          lastChanged: Date.now(),
+        });
+        onDisconnect(userStatusRef).set({
+          state: "offline",
+          lastChanged: Date.now(),
+        });
+      }
+    });
+
+  } catch (error) {
+    console.error("Login error:", error);
+    if (error.code === "auth/invalid-login-credentials") {
+      setFirebaseError("Incorrect email or password.");
+    } else {
+      setFirebaseError(error.message || "Something went wrong.");
+    }
+  } finally {
+    setLoading(false);
+  }
+};
+
+
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
@@ -80,9 +175,12 @@ export default function LoginScreen({ navigation }) {
         style={{ flex: 1, backgroundColor: "#fff" }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
       >
-        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          contentContainerStyle={styles.container}
+          keyboardShouldPersistTaps="handled"
+        >
           <Image
-            source={require("../../../assets/android/NutriFitLogo.png")}
+            source={require("../../../assets/NutriFitLogo.png")}
             style={styles.logo}
           />
 
@@ -90,7 +188,7 @@ export default function LoginScreen({ navigation }) {
             Take it, Eat it, Reach it with NutriFit
           </Text>
 
-          <Text style={styles.title}>Welcome Back!</Text>
+          <Text style={styles.title}>Stay on track</Text>
 
           <TextInput
             style={[styles.input, emailError && styles.inputError]}
@@ -102,7 +200,9 @@ export default function LoginScreen({ navigation }) {
           />
           {emailError ? <Text style={styles.errorText}>{emailError}</Text> : null}
 
-          <View style={[styles.passwordContainer, passwordError && styles.inputError]}>
+          <View
+            style={[styles.passwordContainer, passwordError && styles.inputError]}
+          >
             <TextInput
               style={styles.passwordInput}
               placeholder="Password"
@@ -110,27 +210,42 @@ export default function LoginScreen({ navigation }) {
               value={password}
               onChangeText={setPassword}
             />
-            <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
-              <Ionicons name={showPassword ? "eye-off" : "eye"} size={20} color="#6b7280" />
+            <TouchableOpacity
+              onPress={() => setShowPassword(!showPassword)}
+              style={styles.eyeIcon}
+            >
+              <Ionicons
+                name={showPassword ? "eye-off" : "eye"}
+                size={20}
+                color="#6b7280"
+              />
             </TouchableOpacity>
           </View>
           {passwordError ? <Text style={styles.errorText}>{passwordError}</Text> : null}
 
-          {firebaseError ? <Text style={styles.errorText}>{firebaseError}</Text> : null}
+          {firebaseError ? (
+            <Text style={styles.errorText}>{firebaseError}</Text>
+          ) : null}
 
           <TouchableOpacity
             style={styles.button}
             onPress={handleLogin}
             disabled={loading}
           >
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log In</Text>}
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Log In</Text>
+            )}
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => navigation.navigate("GetStarted", { fromLogin: true })}>
-            <Text style={{ color: "#22c55e", textAlign: "center", marginTop: 16 }}>
+          <TouchableOpacity
+            onPress={() => navigation.navigate("GetStarted", { fromLogin: true })}
+          >
+            <Text style={styles.signUpLink}>
               Don’t have an account? Sign up
             </Text>
-          </TouchableOpacity>  
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </TouchableWithoutFeedback>
@@ -214,5 +329,10 @@ const styles = StyleSheet.create({
   },
   inputError: {
     borderColor: "#dc2626",
+  },
+  signUpLink: {
+    color: "#22c55e",
+    textAlign: "center",
+    marginTop: 16,
   },
 });

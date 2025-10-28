@@ -24,7 +24,7 @@ const { width } = Dimensions.get("window");
   const steps = [
     "Let’s start with your name.",
     "What’s your Last Name?",
-    "What is your Gender?",
+    "What is your Sex?",
     "Weight",
     "Height",
     "What is your goal?",
@@ -78,8 +78,8 @@ const [userData, setUserData] = useState({
   Height: "",
   Weight: "",
   WeightUnit: "kg",
-  HeightUnit: "cm",
-  HeightFtIn: "",
+  HeightUnit: "ftin",
+  HeightFtIn: "4' 0\"",
   TargetKg: "",
   TargetKgUnit: "kg",
   Activity: "",
@@ -199,37 +199,48 @@ const toggleHealthCondition = (condition) => {
 
 
 const getBMIMessage = (bmi, category, goal) => {
-    const bmiFormatted = bmi.toFixed(1);
+  const bmiFormatted = bmi.toFixed(1);
 
-    switch (category) {
-      case "Underweight":
-        return {
-          title: `A BMI of ${bmiFormatted} indicates you're in the Underweight range.`,
-          suggestion: `A goal like ${goal} can help you build strength, energy, and resilience.`,
-        };
-      case "Normal":
-      case "Healthy":
-        return {
-          title: `A BMI of ${bmiFormatted} is within the Healthy range.`,
-          suggestion: `Great job! We recommend focusing on maintaining your current weight and overall wellness.`,
-        };
-      case "Overweight":
-        return {
-          title: `A BMI of ${bmiFormatted} falls within the Overweight category.`,
-          suggestion: `A goal such as ${goal} can support your well-being and long-term vitality.`,
-        };
-      case "Obese":
-        return {
-          title: `A BMI of ${bmiFormatted} places you in the Obese category.`,
-          suggestion: `Aiming for ${goal} may significantly reduce health risks and improve your quality of life.`,
-        };
-      default:
-        return {
-          title: `Your BMI is ${bmiFormatted}.`,
-          suggestion: `Suggested goal: ${goal}`,
-        };
-    }
-  };
+  switch (category) {
+    case "Underweight":
+      return {
+        title: `A BMI of ${bmiFormatted} indicates you're in the Underweight range.`,
+        suggestion: `A goal like ${goal} can help you build strength, energy, and resilience.`,
+      };
+    case "Normal":
+    case "Healthy":
+      return {
+        title: `A BMI of ${bmiFormatted} is within the Healthy range.`,
+        suggestion: `Great job! Focus on maintaining your current weight and overall wellness.`,
+      };
+    case "Overweight":
+      return {
+        title: `A BMI of ${bmiFormatted} falls within the Overweight category.`,
+        suggestion: `A goal such as ${goal} can support your well-being and long-term vitality.`,
+      };
+    case "Obese Class 1":
+      return {
+        title: `A BMI of ${bmiFormatted} places you in Obese Class 1 (30.0–34.9).`,
+        suggestion: `Aiming for ${goal} can reduce health risks and improve overall fitness.`,
+      };
+    case "Obese Class 2":
+      return {
+        title: `A BMI of ${bmiFormatted} places you in Obese Class 2 (35.0–39.9).`,
+        suggestion: `A goal like ${goal} is important to lower the risk of serious health issues.`,
+      };
+    case "Obese Class 3 (Severe Obesity)":
+      return {
+        title: `A BMI of ${bmiFormatted} places you in Obese Class 3 (≥40.0, Severe Obesity).`,
+        suggestion: `Prioritizing ${goal} can have significant benefits for your health and quality of life.`,
+      };
+    default:
+      return {
+        title: `Your BMI is ${bmiFormatted}.`,
+        suggestion: `Suggested goal: ${goal}`,
+      };
+  }
+};
+
 
 
 
@@ -238,16 +249,19 @@ const getBMIMessage = (bmi, category, goal) => {
     const valid = validateStep(false);
     setIsCurrentStepValid(valid);
   }, [userData, currentStep]);
+  
+
 
 const validateStep = (showAlerts = true) => {
+  const containsNumber = (str) => /\d/.test(str);
   const key = derivedSteps[currentStep];
 
-  if (key === steps[0] && (!userData.firstName || userData.firstName.trim().length < 2)) {
+  if (key === steps[0] && (!userData.firstName || userData.firstName.trim().length < 2 || containsNumber(userData.firstName))) {
     showAlerts && Alert.alert("Enter your first name.");
     return false;
   }
 
-  if (key === steps[1] && (!userData.lastName || userData.lastName.trim().length < 2)) {
+  if (key === steps[1] && (!userData.lastName || userData.lastName.trim().length < 2 || containsNumber(userData.lastName))) {
     showAlerts && Alert.alert("Enter your last name.");
     return false;
   }
@@ -363,9 +377,10 @@ const handleNext = () => {
   if (!validateStep(true)) return;
 
   const key = derivedSteps[currentStep];
-  const nextKey = steps[currentStep + 1];
 
-  // ✅ BMI Goal Alert Logic
+
+
+  // ✅ BMI Goal Suggestion
   if (key === "What is your goal?") {
     const heightCm =
       userData.HeightUnit === "cm"
@@ -380,31 +395,24 @@ const handleNext = () => {
     const bmi = calculateBMI(weightKg, heightCm);
     let suggestedGoal = null;
 
-    
-
     if (bmi) {
       if (bmi < 18.5) suggestedGoal = "Weight Gain";
-      else if (bmi >= 18.5 && bmi < 25) suggestedGoal = "Maintain my current weight";
+      else if (bmi < 25) suggestedGoal = "Maintain my current weight";
       else suggestedGoal = "Weight Loss";
     }
 
-    if (
-      userData.Goal !== suggestedGoal &&
-      userData.Goal !== "Maintain my current weight"
-    ) {
+    if (userData.Goal !== suggestedGoal && userData.Goal !== "Maintain my current weight") {
       Alert.alert(
         "Are you sure?",
-        `The suggested goal based on your BMI is "${suggestedGoal}". Do you want to continue with "${userData.Goal}"?`,
+        `Based on your BMI, the suggested goal is "${suggestedGoal}". Continue with "${userData.Goal}"?`,
         [
           { text: "Cancel", style: "cancel" },
           {
             text: "Continue",
             onPress: () => {
-              if (userData.Goal === "Maintain my current weight") {
-                setCurrentStep((prev) => prev + 2); // Skip target weight
-              } else {
-                setCurrentStep((prev) => prev + 1);
-              }
+              setCurrentStep((prev) =>
+                userData.Goal === "Maintain my current weight" ? prev + 2 : prev + 1
+              );
             },
           },
         ]
@@ -412,72 +420,72 @@ const handleNext = () => {
       return;
     }
 
-    // If not showing alert and goal is maintain, skip next step
     if (userData.Goal === "Maintain my current weight") {
       setCurrentStep((prev) => prev + 2);
       return;
     }
   }
 
-  // ✅ Skip "Allergy Details" if "Allergies" not selected
-if (key === "Do you have any health conditions?") {
-  const selectedConditions = userData.HealthConditions.filter(
-    (c) => c !== "None"
-  );
-  
-  // Show modal if 2+ conditions selected
-  if (selectedConditions.length >= 2) {
-    setShowHealthWarning(true);
-    return;
-  }
+  // ✅ Skip Allergy step if no allergies
+  if (key === "Do you have any health conditions?") {
+    const selected = userData.HealthConditions.filter((c) => c !== "None");
 
-  // Handle Allergy skip
-  const hasAllergies = userData.HealthConditions.includes("Allergies");
-  const nextStep = steps[currentStep + 1];
-  if (!hasAllergies && nextStep === "Allergy Details") {
-    setCurrentStep((prev) => prev + 2);
-    return;
-  }
-}
-
-
-  // ✅ Allergy step validation
-  if (key === "Allergy Details") {
-    const selected = userData.Allergies || [];
-
-    if (selected.length === 0) {
-      Alert.alert("Please select at least one allergy.");
+    if (selected.length >= 2) {
+      setShowHealthWarning(true);
       return;
     }
 
+    if (
+      !userData.HealthConditions.includes("Allergies") &&
+      derivedSteps[currentStep + 1] === "Allergy Details"
+    ) {
+      setCurrentStep((prev) => prev + 2);
+      return;
+    }
+  }
+
+  // ✅ Validate Allergy Details
+  if (key === "Allergy Details") {
+    const selected = userData.Allergies || [];
+    if (!selected.length) {
+      Alert.alert("Please select at least one allergy.");
+      return;
+    }
     if (selected.includes("Others") && !userData.OtherAllergy?.trim()) {
       Alert.alert("Please specify your allergy under 'Others'.");
       return;
     }
   }
 
-  // ✅ Final step: submit and set age, height
-  if (currentStep < steps.length - 1) {
-    setCurrentStep((prev) => prev + 1);
-  } else {
+  // ✅ Final Step: calculate age, height, and preserve Activity ID & numeric factor
+  if (currentStep === steps.length - 1) {
     const age = calculateAge(userData.Birthday);
-    let finalHeight = userData.Height;
+    const finalHeight =
+      userData.HeightUnit === "cm"
+        ? parseFloat(userData.Height)
+        : convertFtInToCm(userData.HeightFtIn);
 
-    if (userData.HeightUnit === "ftin") {
-      finalHeight = convertFtInToCm(userData.HeightFtIn);
-    }
+    setUserData((prev) => {
+      console.log("Selected Activity ID:", prev.ActivityId);
+      console.log("Numeric activity factor:", prev.Activity);
 
-    setUserData((prev) => ({
-      ...prev,
-      Age: age,
-      Height: finalHeight,
-      HeightUnit: "cm",
-    }));
+      return {
+        ...prev,
+        Age: age,
+        Height: finalHeight,
+        HeightUnit: "cm",
+        ActivityId: prev.ActivityId, // preserve exact selection
+        Activity: prev.Activity,     // preserve numeric factor
+      };
+    });
 
     setAuthPromptVisible(true);
+    return;
   }
-};
 
+  // ✅ Default: move to next step
+  setCurrentStep((prev) => prev + 1);
+};
 
 
 
@@ -520,6 +528,13 @@ useEffect(() => {
     setShowCustomGoalOptions(false);
   }
 }, [currentStep]);
+
+const isValidName = (name) => {
+  // Only allow letters, spaces, hyphens, and apostrophes
+  const regex = /^[a-zA-Z\s'-]+$/;
+  return regex.test(name.trim());
+};
+
 const renderStep = () => {
   const key = derivedSteps[currentStep];
 
@@ -552,7 +567,7 @@ const renderStep = () => {
     );
   }
 
-  if (key === "What is your Gender?") {
+  if (key === "What is your Sex?") {
     return (
       <View style={styles.genderGrid}>
         {["Male", "Female"].map((gender) => (
@@ -611,68 +626,81 @@ const renderStep = () => {
     );
   }
 
-  if (key === "Height") {
-    if (userData.HeightUnit === "cm") {
-      return (
-        <View style={styles.inlineRow}>
-          <TextInput
-            placeholder="Height"
-            value={userData.Height}
-            onChangeText={(text) =>
-              handleInputChange("Height", text.replace(/[^0-9.]/g, ""))
-            }
-            style={styles.smallInput}
-            keyboardType="numeric"
-            placeholderTextColor="#9ca3af"
-          />
-          <View style={styles.pickerContainerFixed}>
-            <Picker
-              selectedValue={userData.HeightUnit}
-              onValueChange={(value) => handleInputChange("HeightUnit", value)}
-              style={styles.picker}
-            >
-              <Picker.Item label="cm" value="cm" />
-              <Picker.Item label="ft/in" value="ftin" />
-            </Picker>
-          </View>
-        </View>
-      );
-    }
+if (key === "Height") {
+  // ✅ Always default to ft/in
+  if (!userData.HeightUnit) {
+    handleInputChange("HeightUnit", "ftin");
+  }
 
-    const ftInOptions = [];
-    for (let ft = 3; ft <= 7; ft++) {
-      for (let inch = 0; inch <= 11; inch++) {
-        if (ft === 7 && inch > 9) break;
-        ftInOptions.push(`${ft}' ${inch}"`);
-      }
-    }
+  // ✅ Default to 4'0" if empty
+  if (!userData.HeightFtIn) {
+    handleInputChange("HeightFtIn", "4' 0\"");
+  }
 
+  if (userData.HeightUnit === "cm") {
     return (
       <View style={styles.inlineRow}>
-        <View style={styles.fullPickerContainer}>
-          <Picker
-            selectedValue={userData.HeightFtIn}
-            onValueChange={(val) => handleInputChange("HeightFtIn", val)}
-            style={styles.picker}
-          >
-            {ftInOptions.map((label) => (
-              <Picker.Item key={label} label={label} value={label} />
-            ))}
-          </Picker>
-        </View>
+        <TextInput
+          placeholder="Height"
+          value={userData.Height}
+          onChangeText={(text) =>
+            handleInputChange("Height", text.replace(/[^0-9.]/g, ""))
+          }
+          style={styles.smallInput}
+          keyboardType="numeric"
+          placeholderTextColor="#9ca3af"
+        />
         <View style={styles.pickerContainerFixed}>
           <Picker
             selectedValue={userData.HeightUnit}
             onValueChange={(value) => handleInputChange("HeightUnit", value)}
             style={styles.picker}
           >
-            <Picker.Item label="cm" value="cm" />
             <Picker.Item label="ft/in" value="ftin" />
+            <Picker.Item label="cm" value="cm" />
           </Picker>
         </View>
       </View>
     );
   }
+
+  // ✅ ft/in picker options from 4'0" up to 7'9"
+  const ftInOptions = [];
+  for (let ft = 4; ft <= 7; ft++) {
+    for (let inch = 0; inch <= 11; inch++) {
+      if (ft === 7 && inch > 9) break; // Limit at 7'9"
+      ftInOptions.push(`${ft}' ${inch}"`);
+    }
+  }
+
+  return (
+    <View style={styles.inlineRow}>
+      <View style={styles.fullPickerContainer}>
+        <Picker
+          selectedValue={userData.HeightFtIn}
+          onValueChange={(val) => handleInputChange("HeightFtIn", val)}
+          style={styles.picker}
+        >
+          {ftInOptions.map((label) => (
+            <Picker.Item key={label} label={label} value={label} />
+          ))}
+        </Picker>
+      </View>
+
+      <View style={styles.pickerContainerFixed}>
+        <Picker
+          selectedValue={userData.HeightUnit || "ftin"} // ✅ default ft/in
+          onValueChange={(value) => handleInputChange("HeightUnit", value)}
+          style={styles.picker}
+        >
+          <Picker.Item label="ft/in" value="ftin" />
+          <Picker.Item label="cm" value="cm" />
+        </Picker>
+      </View>
+    </View>
+  );
+}
+
 
 if (key === "What is your goal?") {
   const heightCm =
@@ -692,24 +720,30 @@ if (key === "What is your goal?") {
 
 
   if (bmi) {
-    if (bmi < 18.5){
+    if (bmi < 18.5) {
       bmiCategory = "Underweight";
       suggestedGoal = "Weight Gain";
-    }
-    else if (bmi >= 18.5 && bmi < 25){
-        bmiCategory = "Normal";
-       suggestedGoal = "Maintain my current weight";
-    }else if(bmi >= 25 && bmi < 30){
+    } else if (bmi >= 18.5 && bmi < 25) {
+      bmiCategory = "Normal";
+      suggestedGoal = "Maintain my current weight";
+    } else if (bmi >= 25 && bmi < 30) {
       bmiCategory = "Overweight";
-      suggestedGoal = "Weight Loss"
-    }
-    else{
-      bmiCategory = "Obese";
+      suggestedGoal = "Weight Loss";
+    } else {
+      // Obesity classifications
+      if (bmi >= 30 && bmi < 35) {
+        bmiCategory = "Obese Class 1";
+      } else if (bmi >= 35 && bmi < 40) {
+        bmiCategory = "Obese Class 2";
+      } else if (bmi >= 40) {
+        bmiCategory = "Obese Class 3 (Severe Obesity)";
+      }
       suggestedGoal = "Weight Loss";
     }
   }
 
-  
+
+  const isObese = bmi >= 30; // ✅ new flag
   const { title, suggestion } = getBMIMessage(bmi, bmiCategory, suggestedGoal);
   
   const manualGoals = [
@@ -730,9 +764,9 @@ if (key === "What is your goal?") {
       <View style={styles.goalGrid}>
         {manualGoals.map((opt) => {
           const isDisabled =
-          !showCustomGoalOptions &&
-          opt !== suggestedGoal &&
-          opt !== "Maintain my current weight";
+            !showCustomGoalOptions &&
+            ((opt === "Maintain my current weight" && isObese) || 
+             (opt !== suggestedGoal && opt !== "Maintain my current weight"));
 
           const isSelected = userData.Goal === opt;
 
@@ -823,63 +857,52 @@ if (key === "What is your goal?") {
   }
 
 
-    if (key === "What is your Activity level?") {
-      const activityOptions = [
-        {
-          label: "Sedentary",
-          description:
-            "Little to no physical activity (e.g., sitting most of the day)",
-        },
-        {
-          label: "Low Active",
-          description: "Light daily activity like walking or light chores",
-        },
-        {
-          label: "Active",
-          description: "Regular moderate exercise or active job",
-        },
-        {
-          label: "Very Active",
-          description: "Intense exercise or physically demanding work",
-        },
-      ];
+   if (key === "What is your Activity level?") {
+  const activityOptions = [
+    { label: "Sedentary", id: 1, description: "Little to no physical activity (0-2 Days, e.g., sitting most of the day)" },
+    { label: "Lightly Active", id: 2, description: "Light exercise or sports 1–3 days a week" },
+    { label: "Moderately Active", id: 3, description: "Moderate exercise or sports 3–5 days a week" },
+    { label: "Very Active", id: 4, description: "Hard exercise or sports 6–7 days a week" },
+    { label: "Extremely Active", id: 5, description: "Very hard exercise or physical job, or training twice a day" },
+  ];
 
-      return (
-        <>
-        <View style={styles.activityGroup}>
-          {activityOptions.map(({ label, description }) => (
-            <TouchableOpacity
-              key={label}
-              style={[
-                styles.activityCard,
-                userData.Activity === label && styles.activityCardSelected,
-              ]}
-              onPress={() => handleInputChange("Activity", label)}
-            >
-              <Text
-                style={[
-                  styles.activityLabel,
-                  userData.Activity === label && styles.activityLabelSelected,
-                ]}
-                
-              >
-                {label}
-              </Text>
-              <Text
-                style={[
-                  styles.activityDescription,
-                  userData.Activity === label &&
-                    styles.activityDescriptionSelected,
-                ]}
-              >
-                {description}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        </>
-      );
-    }
+  const activityValues = {
+    1: 1.2,
+    2: 1.375,
+    3: 1.55,
+    4: 1.725,
+    5: 1.9,
+  };
+
+  return (
+    <View style={styles.activityGroup}>
+      {activityOptions.map(({ label, id, description }) => (
+        <TouchableOpacity
+          key={id}
+          style={[
+            styles.activityCard,
+            userData.Activity === activityValues[id] && styles.activityCardSelected,
+          ]}
+         onPress={() => 
+          setUserData((prev) => ({
+            ...prev,
+            ActivityId: id,            // save the selected option ID
+            Activity: activityValues[id], // save numeric factor
+          }))
+        }
+        >
+          <Text style={[styles.activityLabel, userData.Activity === activityValues[id] && styles.activityLabelSelected]}>
+            {label}
+          </Text>
+          <Text style={[styles.activityDescription, userData.Activity === activityValues[id] && styles.activityDescriptionSelected]}>
+            {description}
+          </Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
 
 if (key === "Do you have any health conditions?") {
   const options = [
@@ -989,7 +1012,7 @@ if (key === "Medications") {
 
 if (derivedSteps[currentStep] === "Allergy Details") {
   const allergyOptions = [
-    "Peanuts",
+    "Nuts",
     "Shellfish",
     "Shrimp",
     "Chocolates",
@@ -1162,7 +1185,7 @@ if (key === "When is your Birthday?") {
         <View style={styles.topRow}>
           {currentStep > 0 ? (
             <TouchableOpacity onPress={handleBack}>
-              <Ionicons name="arrow-back" size={24} color="#14532d" />
+              <Ionicons name="arrow-back" size={24} color="#55555" />
             </TouchableOpacity>
           ) : (
             <View style={{ width: 24 }} />
@@ -1202,11 +1225,11 @@ if (key === "When is your Birthday?") {
               </View>
             </TouchableOpacity>
 
-            <TouchableOpacity
+            {/* <TouchableOpacity
               style={styles.authGoogleButton}
               onPress={() => {
                 setAuthPromptVisible(false);
-                navigation.navigate("GoogleSignIn", { userData });
+                Alert.alert("Coming Soon", "Google Sign-In is coming soon!");
               }}
             >
               <View style={styles.googleRow}>
@@ -1216,7 +1239,8 @@ if (key === "When is your Birthday?") {
                 />
                 <Text style={styles.disagreeText}>Continue with Google</Text>
               </View>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
+
           </Animated.View>
         </View>
       </Modal>
@@ -1284,7 +1308,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 22,
     fontWeight: "700",
-    color: "#14532d",
+    color: "#55555",
     marginBottom: 16,
     textAlign: "center",
   },
@@ -1367,7 +1391,7 @@ const styles = StyleSheet.create({
   stepTitle: {
     fontSize: 20,
     fontWeight: "700",
-    color: "#14532d",
+    color: "#55555",
     marginBottom: 20,
     textAlign: "center",
   },
@@ -1419,8 +1443,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   goalBoxSelected: {
-    borderColor: "#14532d",
-    backgroundColor: "#14532d",
+    borderColor: "#22c55e",
+    backgroundColor: "#22c55e",
   },
   goalText: {
     fontSize: 15,
@@ -1446,8 +1470,8 @@ const styles = StyleSheet.create({
     borderColor: "#d1d5db",
   },
   genderBoxSelected: {
-    borderColor: "#14532d",
-    backgroundColor: "#14532d",
+    borderColor: "#22c55e",
+    backgroundColor: "#22c55e",
   },
   genderText: {
     fontSize: 16,
@@ -1468,8 +1492,8 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   activityCardSelected: {
-    borderColor: "#14532d",
-    backgroundColor: "#14532d",
+    borderColor: "#22c55e",
+    backgroundColor: "#22c55e",
   },
   activityLabel: {
     fontSize: 16,
@@ -1576,7 +1600,7 @@ authModalContent: {
 authTitle: {
   fontSize: 22,
   fontWeight: "700",
-  color: "#14532d",
+  color: "#55555",
   marginBottom: 16,
   textAlign: "center",
 },
